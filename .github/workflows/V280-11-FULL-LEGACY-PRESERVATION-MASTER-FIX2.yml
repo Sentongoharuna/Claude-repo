@@ -1,0 +1,812 @@
+name: Build develop.uganda V280-11 FULL LEGACY PRESERVATION MASTER FIX2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280-11-FULL-LEGACY-PRESERVATION-MASTER-FIX2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_11_full_legacy_preservation_master_fix2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Fetch verified V280-5 recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            'https://raw.githubusercontent.com/Sentongoharuna/Claude-repo/3324bd4558283334bd5b93225ee9dfd19cf59cdb/.github/workflows/V280-5-PRO-CAM.yml' \
+            -o /tmp/V280-5-PRO-CAM.yml
+          echo 'dab9a31f43408a4fe047efd9bbbab7c4d75dd5505a7ee840c7b3be6d09aa10be  /tmp/V280-5-PRO-CAM.yml' | sha256sum -c -
+          echo 'PASS: verified V280-5 build recipe downloaded.'
+
+      - name: Replay V280-5 source recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess, sys
+
+          recipe = Path('/tmp/V280-5-PRO-CAM.yml')
+          text = recipe.read_text(encoding='utf-8')
+          lines = text.splitlines()
+
+          targets = [
+              'Restore cumulative V270 base',
+              'Apply cumulative V271 V272 V273 V274 source patch',
+              'Apply V275 control surface + dual settings patch',
+              'Apply V276 recording safety + recovery patch',
+              'Apply V277 lighting + exposure intelligence overlay',
+              'Verify V277 preservation and version',
+              'Apply V278 live workflow home overlay',
+              'Apply V279 active shooting intelligence overlay',
+              'Apply V280 Smart Director + sequence coverage overlay',
+              'Verify V280 preservation and Smart Director integration',
+              'Apply V280-5 video pipeline safe-mode hotfix',
+          ]
+
+          def extract_run(name):
+              marker = re.compile(r'^(\s*)-\s+name:\s+' + re.escape(name) + r'\s*$')
+              start = None
+              step_indent = None
+              for i, line in enumerate(lines):
+                  m = marker.match(line)
+                  if m:
+                      start = i
+                      step_indent = len(m.group(1))
+                      break
+              if start is None:
+                  raise SystemExit(f'Missing recipe step: {name}')
+
+              end = len(lines)
+              for i in range(start + 1, len(lines)):
+                  stripped = lines[i].lstrip(' ')
+                  indent = len(lines[i]) - len(stripped)
+                  if stripped.startswith('- name:') and indent == step_indent:
+                      end = i
+                      break
+
+              run_line = None
+              run_indent = None
+              for i in range(start + 1, end):
+                  stripped = lines[i].lstrip(' ')
+                  indent = len(lines[i]) - len(stripped)
+                  if stripped == 'run: |':
+                      run_line = i
+                      run_indent = indent
+                      break
+              if run_line is None:
+                  raise SystemExit(f'No run block found for: {name}')
+
+              block = []
+              content_indent = run_indent + 2
+              for i in range(run_line + 1, end):
+                  line = lines[i]
+                  if not line.strip():
+                      block.append('')
+                      continue
+                  indent = len(line) - len(line.lstrip(' '))
+                  if indent <= run_indent:
+                      break
+                  block.append(line[content_indent:] if len(line) >= content_indent else '')
+              return '\n'.join(block) + '\n'
+
+          for name in targets:
+              print(f'\n===== {name} =====', flush=True)
+              script = extract_run(name)
+              # Avoid Linux ARG_MAX for the very large embedded patch steps.
+              # Write each extracted run block to a real shell script, then execute the file.
+              safe_name = ''.join(c if c.isalnum() else '_' for c in name)
+              script_path = Path('/tmp') / f'v2805_{safe_name}.sh'
+              script_path.write_text(
+                  '#!/usr/bin/env bash\nset -euo pipefail\n' + script,
+                  encoding='utf-8'
+              )
+              script_path.chmod(0o700)
+              result = subprocess.run(
+                  ['bash', str(script_path)],
+                  cwd='.',
+                  text=True
+              )
+              if result.returncode != 0:
+                  raise SystemExit(result.returncode)
+
+          print('\nPASS: V280-5 source recipe replay completed.', flush=True)
+          PY
+
+      - name: Apply V280-9 safe V272 audio continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d > /tmp/v2806_patch.py <<'V2809_PATCH_B64'
+          ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmNhbWVyYSA9IFBhdGgoJ3YxNzItc291cmNlL2FwcC9z
+          cmMvbWFpbi9qYXZhL2NvbS9zZW50b25nb2hhcnVuYS9wdWxzZS9EZXZlbG9wVWdhbmRhQ2FtZXJh
+          QWN0aXZpdHkua3QnKQpncmFkbGUgPSBQYXRoKCd2MTcyLXNvdXJjZS9hcHAvYnVpbGQuZ3JhZGxl
+          Lmt0cycpCnMgPSBjYW1lcmEucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpCgpzdGFydCA9IHMu
+          aW5kZXgoJyAgICAgICAgfSBlbHNlIHtcbiAgICAgICAgICAgIHZhciBzZWxlY3RlZFF1YWxpdHlT
+          ZWxlY3RvciA9JykKZW5kID0gcy5pbmRleCgnICAgICAgICAvLyBWMjgwLzUgVklERU8gUElQRUxJ
+          TkUgU0FGRSBNT0RFOicsIHN0YXJ0KQpzaW1wbGVfdmlkZW8gPSAnJycgICAgICAgIH0gZWxzZSB7
+          CiAgICAgICAgICAgIC8vIFYyODAvOSBSRUMgQ09SRSBESUFHTk9TVElDOgogICAgICAgICAgICAv
+          LyBVc2UgdGhlIHNpbXBsZXN0IGhhcmR3YXJlLWNvbXBhdGlibGUgdmlkZW8gcHJvZmlsZSBwb3Nz
+          aWJsZS4KICAgICAgICAgICAgYWN0aXZlVmlkZW9GcHNMYWJlbCA9ICJBVVRPIEZQUyIKICAgICAg
+          ICAgICAgYWN0aXZlVmlkZW9TdGFiaWxpemF0aW9uTGFiZWwgPSAiU1RBQiBPRkYiCiAgICAgICAg
+          ICAgIGFjdGl2ZVZpZGVvRHluYW1pY1JhbmdlTGFiZWwgPSAiU0RSIgoKICAgICAgICAgICAgdmFs
+          IHJlY29yZGVyID0KICAgICAgICAgICAgICAgIFJlY29yZGVyLkJ1aWxkZXIoKQogICAgICAgICAg
+          ICAgICAgICAgIC5zZXRRdWFsaXR5U2VsZWN0b3IoCiAgICAgICAgICAgICAgICAgICAgICAgIFF1
+          YWxpdHlTZWxlY3Rvci5mcm9tKAogICAgICAgICAgICAgICAgICAgICAgICAgICAgUXVhbGl0eS5G
+          SEQsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBGYWxsYmFja1N0cmF0ZWd5Lmxvd2VyUXVh
+          bGl0eU9ySGlnaGVyVGhhbigKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBRdWFsaXR5
+          LkhECiAgICAgICAgICAgICAgICAgICAgICAgICAgICApCiAgICAgICAgICAgICAgICAgICAgICAg
+          ICkKICAgICAgICAgICAgICAgICAgICApCiAgICAgICAgICAgICAgICAgICAgLmJ1aWxkKCkKCiAg
+          ICAgICAgICAgIHZpZGVvQ2FwdHVyZSA9CiAgICAgICAgICAgICAgICBWaWRlb0NhcHR1cmUuQnVp
+          bGRlcigKICAgICAgICAgICAgICAgICAgICByZWNvcmRlcgogICAgICAgICAgICAgICAgKQogICAg
+          ICAgICAgICAgICAgICAgIC5idWlsZCgpCiAgICAgICAgfQoKJycnCnMgPSBzWzpzdGFydF0gKyBz
+          aW1wbGVfdmlkZW8gKyBzW2VuZDpdCgpmcHNfc3RhcnRfbWFya2VyID0gJyAgICAgICAgaWYgKCFw
+          aG90b01vZGUgJiYgc2VsZWN0ZWRDYW1lcmFJbmZvICE9IG51bGwpIHsnCmJpbmRfbWFya2VyID0g
+          JyAgICAgICAgdHJ5IHtcbiAgICAgICAgICAgIGNhbWVyYSA9IHAuYmluZFRvTGlmZWN5Y2xlKCcK
+          ZnBzX3N0YXJ0ID0gcy5pbmRleChmcHNfc3RhcnRfbWFya2VyLCBzLmluZGV4KCdWMjgwLzUgVklE
+          RU8gUElQRUxJTkUgU0FGRSBNT0RFJykpCmJpbmRfc3RhcnQgPSBzLmluZGV4KGJpbmRfbWFya2Vy
+          LCBmcHNfc3RhcnQpCnMgPSBzWzpmcHNfc3RhcnRdICsgc1tiaW5kX3N0YXJ0Ol0KCm9sZF9iaW5k
+          ID0gJycnICAgICAgICB0cnkgewogICAgICAgICAgICBjYW1lcmEgPSBwLmJpbmRUb0xpZmVjeWNs
+          ZSgKICAgICAgICAgICAgICAgIHRoaXMsCiAgICAgICAgICAgICAgICBzZWxlY3RvciwKICAgICAg
+          ICAgICAgICAgIHNlc3Npb24KICAgICAgICAgICAgKQonJycKbmV3X2JpbmQgPSAnJycgICAgICAg
+          IHRyeSB7CiAgICAgICAgICAgIGNhbWVyYSA9CiAgICAgICAgICAgICAgICBpZiAocGhvdG9Nb2Rl
+          KSB7CiAgICAgICAgICAgICAgICAgICAgcC5iaW5kVG9MaWZlY3ljbGUoCiAgICAgICAgICAgICAg
+          ICAgICAgICAgIHRoaXMsCiAgICAgICAgICAgICAgICAgICAgICAgIHNlbGVjdG9yLAogICAgICAg
+          ICAgICAgICAgICAgICAgICBzZXNzaW9uCiAgICAgICAgICAgICAgICAgICAgKQogICAgICAgICAg
+          ICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgICAgICAgICBwLmJpbmRUb0xpZmVjeWNsZSgKICAg
+          ICAgICAgICAgICAgICAgICAgICAgdGhpcywKICAgICAgICAgICAgICAgICAgICAgICAgc2VsZWN0
+          b3IsCiAgICAgICAgICAgICAgICAgICAgICAgIHByZXZpZXcsCiAgICAgICAgICAgICAgICAgICAg
+          ICAgIHZpZGVvQ2FwdHVyZSEhCiAgICAgICAgICAgICAgICAgICAgKQogICAgICAgICAgICAgICAg
+          fQonJycKaWYgb2xkX2JpbmQgbm90IGluIHM6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCdWMjgwLzk6
+          IGV4cGVjdGVkIGNhbWVyYSBiaW5kIGJsb2NrIG5vdCBmb3VuZCcpCnMgPSBzLnJlcGxhY2Uob2xk
+          X2JpbmQsIG5ld19iaW5kLCAxKQoKcmVjX3N0YXJ0ID0gcy5pbmRleCgnICAgIHByaXZhdGUgZnVu
+          IHRvZ2dsZVJlY29yZGluZygpIHsnKQpyZWNfZW5kID0gcy5pbmRleCgnICAgIHByaXZhdGUgZnVu
+          IHRha2VQaG90bygpIHsnLCByZWNfc3RhcnQpCmJhcmVfcmVjID0gJycnICAgIHByaXZhdGUgZnVu
+          IHRvZ2dsZVJlY29yZGluZygpIHsKICAgICAgICBpZiAoY2FwdHVyZU1vZGVzW2NhcHR1cmVNb2Rl
+          SW5kZXhdID09ICJQSE9UTyIpIHsKICAgICAgICAgICAgdGFrZVBob3RvKCkKICAgICAgICAgICAg
+          cmV0dXJuCiAgICAgICAgfQoKICAgICAgICB2YWwgdmMgPSB2aWRlb0NhcHR1cmUgPzogcnVuIHsK
+          ICAgICAgICAgICAgdG9hc3QoIkNhbWVyYSBpcyBzdGlsbCBzdGFydGluZyIpCiAgICAgICAgICAg
+          IHJldHVybgogICAgICAgIH0KCiAgICAgICAgaWYgKHJlY29yZGluZyAhPSBudWxsKSB7CiAgICAg
+          ICAgICAgIHN0YXR1c1ZpZXcudGV4dCA9ICJTQVZJTkfigKYiCiAgICAgICAgICAgIHJlY29yZEJ1
+          dHRvbi50ZXh0ID0gIlNBVklOR+KApiIKICAgICAgICAgICAgcmVjb3JkQnV0dG9uLmlzRW5hYmxl
+          ZCA9IGZhbHNlCiAgICAgICAgICAgIHJlY29yZGluZz8uc3RvcCgpCiAgICAgICAgICAgIHJldHVy
+          bgogICAgICAgIH0KCiAgICAgICAgdmFsIGRpYWdub3N0aWNOYW1lID0KICAgICAgICAgICAgIkRF
+          VkVMT1BfVUdBTkRBX1YyODA5XyR7U3lzdGVtLmN1cnJlbnRUaW1lTWlsbGlzKCl9IgoKICAgICAg
+          ICB2YWwgdmFsdWVzID0gQ29udGVudFZhbHVlcygpLmFwcGx5IHsKICAgICAgICAgICAgcHV0KE1l
+          ZGlhU3RvcmUuVmlkZW8uTWVkaWEuRElTUExBWV9OQU1FLCBkaWFnbm9zdGljTmFtZSkKICAgICAg
+          ICAgICAgcHV0KE1lZGlhU3RvcmUuVmlkZW8uTWVkaWEuTUlNRV9UWVBFLCAidmlkZW8vbXA0IikK
+          ICAgICAgICAgICAgaWYgKGFuZHJvaWQub3MuQnVpbGQuVkVSU0lPTi5TREtfSU5UID49IDI5KSB7
+          CiAgICAgICAgICAgICAgICBwdXQoTWVkaWFTdG9yZS5WaWRlby5NZWRpYS5SRUxBVElWRV9QQVRI
+          LCAiTW92aWVzL2RldmVsb3AudWdhbmRhIikKICAgICAgICAgICAgfQogICAgICAgIH0KCiAgICAg
+          ICAgdmFsIG91dHB1dE9wdGlvbnMgPQogICAgICAgICAgICBNZWRpYVN0b3JlT3V0cHV0T3B0aW9u
+          cy5CdWlsZGVyKAogICAgICAgICAgICAgICAgY29udGVudFJlc29sdmVyLAogICAgICAgICAgICAg
+          ICAgTWVkaWFTdG9yZS5WaWRlby5NZWRpYS5FWFRFUk5BTF9DT05URU5UX1VSSQogICAgICAgICAg
+          ICApCiAgICAgICAgICAgICAgICAuc2V0Q29udGVudFZhbHVlcyh2YWx1ZXMpCiAgICAgICAgICAg
+          ICAgICAuYnVpbGQoKQoKICAgICAgICB0cnkgewogICAgICAgICAgICAvLyBWMjgwLzkga2VlcHMg
+          dGhlIHByb3ZlbiBWMjgwLzggY29yZSArIGF1ZGlvICsgVjI3NiBzYWZldHkgcGF0aC4KICAgICAg
+          ICAgICAgLy8gT05MWSB0aGUgc2FmZSBWMjcyIGF1ZGlvLXJvdXRlIGNvbnRpbnVpdHkgbGF5ZXIg
+          aXMgcmVzdG9yZWQgaGVyZS4KICAgICAgICAgICAgLy8gT3ZlcmxheXMsIHdhdGNoZG9ncywgSERS
+          LCBzdGFiaWxpemF0aW9uIGFuZCBjdXN0b20gRlBTL2JpdHJhdGUgcmVtYWluIGRpc2FibGVkLgog
+          ICAgICAgICAgICB2YWwgaGFzTWljUGVybWlzc2lvbiA9CiAgICAgICAgICAgICAgICBDb250ZXh0
+          Q29tcGF0LmNoZWNrU2VsZlBlcm1pc3Npb24oCiAgICAgICAgICAgICAgICAgICAgdGhpcywKICAg
+          ICAgICAgICAgICAgICAgICBhbmRyb2lkLk1hbmlmZXN0LnBlcm1pc3Npb24uUkVDT1JEX0FVRElP
+          CiAgICAgICAgICAgICAgICApID09IGFuZHJvaWQuY29udGVudC5wbS5QYWNrYWdlTWFuYWdlci5Q
+          RVJNSVNTSU9OX0dSQU5URUQKCiAgICAgICAgICAgIGlmICghaGFzTWljUGVybWlzc2lvbikgewog
+          ICAgICAgICAgICAgICAgcmVxdWVzdFBlcm1pc3Npb25zKAogICAgICAgICAgICAgICAgICAgIGFy
+          cmF5T2YoYW5kcm9pZC5NYW5pZmVzdC5wZXJtaXNzaW9uLlJFQ09SRF9BVURJTyksCiAgICAgICAg
+          ICAgICAgICAgICAgNzEwNwogICAgICAgICAgICAgICAgKQogICAgICAgICAgICAgICAgdG9hc3Qo
+          IkFsbG93IG1pY3JvcGhvbmUsIHRoZW4gcHJlc3MgUkVDIGFnYWluIikKICAgICAgICAgICAgICAg
+          IHJldHVybgogICAgICAgICAgICB9CgogICAgICAgICAgICB2YWwgcGVuZGluZyA9CiAgICAgICAg
+          ICAgICAgICB2Yy5vdXRwdXQKICAgICAgICAgICAgICAgICAgICAucHJlcGFyZVJlY29yZGluZyh0
+          aGlzLCBvdXRwdXRPcHRpb25zKQogICAgICAgICAgICAgICAgICAgIC53aXRoQXVkaW9FbmFibGVk
+          KCkKCiAgICAgICAgICAgIC8vIFYyODAvOSBjb250aW51aXR5IHN0YXRlOiBubyBzZWNvbmQgQXVk
+          aW9SZWNvcmQgaXMgb3BlbmVkLgogICAgICAgICAgICAvLyBDYW1lcmFYIHJlbWFpbnMgdGhlIHNv
+          bGUgbWljcm9waG9uZSBvd25lci4KICAgICAgICAgICAgdmFyIHYyODA5TGFzdFJvdXRlQ2hlY2tN
+          cyA9IDBMCiAgICAgICAgICAgIHZhciB2MjgwOUF1ZGlvUm91dGVXYXJuZWQgPSBmYWxzZQoKICAg
+          ICAgICAgICAgcmVjb3JkaW5nID0gcGVuZGluZy5zdGFydChDb250ZXh0Q29tcGF0LmdldE1haW5F
+          eGVjdXRvcih0aGlzKSkgeyBldmVudCAtPgogICAgICAgICAgICAgICAgd2hlbiAoZXZlbnQpIHsK
+          ICAgICAgICAgICAgICAgICAgICBpcyBWaWRlb1JlY29yZEV2ZW50LlN0YXJ0IC0+IHsKICAgICAg
+          ICAgICAgICAgICAgICAgICAgdjI1NVJlY29yZGVkRHVyYXRpb25OcyA9IDBMCiAgICAgICAgICAg
+          ICAgICAgICAgICAgIHYyNTVSZWNvcmRlZEJ5dGVzID0gMEwKCiAgICAgICAgICAgICAgICAgICAg
+          ICAgIC8vIFYyODAvOTogVjI3NiBzYWZldHkgc3RheXMgZW5hYmxlZCBhbmQgdGhlIHNhZmUgVjI3
+          MgogICAgICAgICAgICAgICAgICAgICAgICAvLyBhdWRpby1yb3V0ZSBjb250aW51aXR5IGxheWVy
+          IGlzIHJlc3RvcmVkLgogICAgICAgICAgICAgICAgICAgICAgICB2YWwgY29udGludWl0eVN0YXJ0
+          ID0KICAgICAgICAgICAgICAgICAgICAgICAgICAgIHJ1bkNhdGNoaW5nIHsKICAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICBEZXZlbG9wVWdhbmRhVjI3MkZpZWxkU291bmRDb250aW51aXR5
+          LmFybUF1ZGlvTG9jaygKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgdGhpc0BE
+          ZXZlbG9wVWdhbmRhQ2FtZXJhQWN0aXZpdHkKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICApCiAgICAgICAgICAgICAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgICAgICAg
+          ICB2YWwgc2FmZXR5U3RhcnQgPQogICAgICAgICAgICAgICAgICAgICAgICAgICAgcnVuQ2F0Y2hp
+          bmcgewogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIERldmVsb3BVZ2FuZGFWMjc2UmVj
+          b3JkaW5nU2FmZXR5Lm9uUmVjb3JkaW5nU3RhcnRlZCgKICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgdGhpc0BEZXZlbG9wVWdhbmRhQ2FtZXJhQWN0aXZpdHksCiAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAgICAgIGRpYWdub3N0aWNOYW1lLAogICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAiQ09SRStBVURJTyIsCiAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgIHYyNjBQcm9qZWN0TmFtZSgpLAogICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgICB2MjYwQ2FtZXJhTmFtZSgpLAogICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICB2MjYwQWN0aXZlU2NlbmVOdW1iZXIsCiAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgIHYyNjBBY3RpdmVUYWtlTnVtYmVyCiAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgKQogICAgICAgICAgICAgICAgICAgICAgICAgICAgfQoKICAgICAgICAgICAgICAgICAg
+          ICAgICAgc3RhdHVzVmlldy50ZXh0ID0KICAgICAgICAgICAgICAgICAgICAgICAgICAgIHdoZW4g
+          ewogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICFzYWZldHlTdGFydC5pc1N1Y2Nlc3Mg
+          LT4KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIuKXjyBSRUMg4oCiIFNBRkVU
+          WSBXQVJOIgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICFjb250aW51aXR5U3RhcnQu
+          aXNTdWNjZXNzIC0+CiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICLil48gUkVD
+          IOKAoiBBVURJTyBMT0NLIFdBUk4iCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgZWxz
+          ZSAtPgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAi4pePIFJFQyDigKIgQ09S
+          RStBVURJTytTQUZFVFkrQ09OVElOVUlUWSIKICAgICAgICAgICAgICAgICAgICAgICAgICAgIH0K
+          ICAgICAgICAgICAgICAgICAgICAgICAgc3RhdHVzVmlldy5zZXRUZXh0Q29sb3IoMHhGRkZGNDEz
+          OC50b0ludCgpKQogICAgICAgICAgICAgICAgICAgICAgICByZWNvcmRCdXR0b24udGV4dCA9ICLi
+          lqAgU1RPUCIKICAgICAgICAgICAgICAgICAgICAgICAgcmVjb3JkQnV0dG9uLmlzRW5hYmxlZCA9
+          IHRydWUKICAgICAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgICAgIGlzIFZpZGVv
+          UmVjb3JkRXZlbnQuU3RhdHVzIC0+IHsKICAgICAgICAgICAgICAgICAgICAgICAgdjI1NVJlY29y
+          ZGVkRHVyYXRpb25OcyA9CiAgICAgICAgICAgICAgICAgICAgICAgICAgICBldmVudC5yZWNvcmRp
+          bmdTdGF0cy5yZWNvcmRlZER1cmF0aW9uTmFub3MKICAgICAgICAgICAgICAgICAgICAgICAgdjI1
+          NVJlY29yZGVkQnl0ZXMgPQogICAgICAgICAgICAgICAgICAgICAgICAgICAgZXZlbnQucmVjb3Jk
+          aW5nU3RhdHMubnVtQnl0ZXNSZWNvcmRlZAoKICAgICAgICAgICAgICAgICAgICAgICAgcnVuQ2F0
+          Y2hpbmcgewogICAgICAgICAgICAgICAgICAgICAgICAgICAgRGV2ZWxvcFVnYW5kYVYyNzZSZWNv
+          cmRpbmdTYWZldHkub25SZWNvcmRpbmdTdGF0dXMoCiAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgdGhpc0BEZXZlbG9wVWdhbmRhQ2FtZXJhQWN0aXZpdHksCiAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgdjI1NVJlY29yZGVkRHVyYXRpb25OcywKICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgICB2MjU1UmVjb3JkZWRCeXRlcwogICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgKQogICAgICAgICAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgICAgICAgICAv
+          LyBDaGVjayB0aGUgc2VsZWN0ZWQgbWljcm9waG9uZSByb3V0ZSBhdCBtb3N0IGV2ZXJ5IDEuNSBz
+          ZWNvbmRzLgogICAgICAgICAgICAgICAgICAgICAgICAvLyBUaGlzIHJlYWRzIEF1ZGlvTWFuYWdl
+          ciBkZXZpY2Ugc3RhdGUgb25seTsgaXQgZG9lcyBOT1Qgb3BlbgogICAgICAgICAgICAgICAgICAg
+          ICAgICAvLyBhbm90aGVyIG1pY3JvcGhvbmUgcmVjb3JkZXIuCiAgICAgICAgICAgICAgICAgICAg
+          ICAgIHZhbCByb3V0ZU5vd01zID0gU3lzdGVtLmN1cnJlbnRUaW1lTWlsbGlzKCkKICAgICAgICAg
+          ICAgICAgICAgICAgICAgaWYgKHJvdXRlTm93TXMgLSB2MjgwOUxhc3RSb3V0ZUNoZWNrTXMgPj0g
+          MTUwMEwpIHsKICAgICAgICAgICAgICAgICAgICAgICAgICAgIHYyODA5TGFzdFJvdXRlQ2hlY2tN
+          cyA9IHJvdXRlTm93TXMKICAgICAgICAgICAgICAgICAgICAgICAgICAgIHZhbCByb3V0ZUNoYW5n
+          ZWQgPQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHJ1bkNhdGNoaW5nIHsKICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgRGV2ZWxvcFVnYW5kYVYyNzJGaWVsZFNvdW5k
+          Q29udGludWl0eS5hdWRpb1JvdXRlQ2hhbmdlZCgKICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgIHRoaXNARGV2ZWxvcFVnYW5kYUNhbWVyYUFjdGl2aXR5CiAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAgICAgICkKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICB9LmdldE9yRGVmYXVsdChmYWxzZSkKCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBpZiAo
+          cm91dGVDaGFuZ2VkICYmICF2MjgwOUF1ZGlvUm91dGVXYXJuZWQpIHsKICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICB2MjgwOUF1ZGlvUm91dGVXYXJuZWQgPSB0cnVlCiAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAgc3RhdHVzVmlldy50ZXh0ID0gIuKXjyBSRUMg4oCiIE1JQyBS
+          T1VURSBDSEFOR0VEIgogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHN0YXR1c1ZpZXcu
+          c2V0VGV4dENvbG9yKDB4RkZEMEIwNkYudG9JbnQoKSkKICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICB0b2FzdCgiTWljcm9waG9uZSByb3V0ZSBjaGFuZ2VkIOKAoiBjaGVjayBpbnB1dCIp
+          CiAgICAgICAgICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICAgICAgICAgIH0K
+          ICAgICAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgICAgIGlzIFZpZGVvUmVjb3Jk
+          RXZlbnQuRmluYWxpemUgLT4gewogICAgICAgICAgICAgICAgICAgICAgICB2YWwgaGFkRXJyb3Ig
+          PSBldmVudC5oYXNFcnJvcigpCiAgICAgICAgICAgICAgICAgICAgICAgIHZhbCBkdXJhdGlvbk1z
+          ID0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICh2MjU1UmVjb3JkZWREdXJhdGlvbk5zIC8g
+          MV8wMDBfMDAwTCkKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAuY29lcmNlQXRMZWFz
+          dCgwTCkKCiAgICAgICAgICAgICAgICAgICAgICAgIHZhbCBzYWZldHlSZXN1bHQgPQogICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAgcnVuQ2F0Y2hpbmcgewogICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgIERldmVsb3BVZ2FuZGFWMjc2UmVjb3JkaW5nU2FmZXR5Lm9uUmVjb3JkaW5nRmlu
+          YWxpemVkKAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICB0aGlzQERldmVsb3BV
+          Z2FuZGFDYW1lcmFBY3Rpdml0eSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ZXZlbnQub3V0cHV0UmVzdWx0cy5vdXRwdXRVcmkudG9TdHJpbmcoKSwKICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAgZHVyYXRpb25NcywKICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgICAgdjI1NVJlY29yZGVkQnl0ZXMsCiAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgIGhhZEVycm9yLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBl
+          bXB0eUxpc3Q8U3RyaW5nPigpCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgKQogICAg
+          ICAgICAgICAgICAgICAgICAgICAgICAgfS5nZXRPck51bGwoKQoKICAgICAgICAgICAgICAgICAg
+          ICAgICAgcmVjb3JkaW5nID0gbnVsbAogICAgICAgICAgICAgICAgICAgICAgICByZWNvcmRCdXR0
+          b24udGV4dCA9ICLil48gUkVDT1JEIgogICAgICAgICAgICAgICAgICAgICAgICByZWNvcmRCdXR0
+          b24uaXNFbmFibGVkID0gdHJ1ZQoKICAgICAgICAgICAgICAgICAgICAgICAgaWYgKGhhZEVycm9y
+          KSB7CiAgICAgICAgICAgICAgICAgICAgICAgICAgICBzdGF0dXNWaWV3LnRleHQgPSAiUkVDIEVS
+          Uk9SICR7ZXZlbnQuZXJyb3J9IgogICAgICAgICAgICAgICAgICAgICAgICAgICAgc3RhdHVzVmll
+          dy5zZXRUZXh0Q29sb3IoMHhGRkZGNDEzOC50b0ludCgpKQogICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgdG9hc3QoIkNhbWVyYVggZXJyb3IgJHtldmVudC5lcnJvcn0iKQogICAgICAgICAgICAg
+          ICAgICAgICAgICB9IGVsc2UgewogICAgICAgICAgICAgICAgICAgICAgICAgICAgc3RhdHVzVmll
+          dy50ZXh0ID0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBzYWZldHlSZXN1bHQ/Lmxh
+          YmVsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgID86ICJTQVZFRCDigKIgQ09S
+          RStBVURJTytTQUZFVFkrQ09OVElOVUlUWSBPSyIKICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          IHN0YXR1c1ZpZXcuc2V0VGV4dENvbG9yKAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          IGlmIChzYWZldHlSZXN1bHQgPT0gbnVsbCB8fCBzYWZldHlSZXN1bHQub2spIHsKICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAgICAgICAgMHhGRjgzQjk5NS50b0ludCgpCiAgICAgICAgICAg
+          ICAgICAgICAgICAgICAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgICAgMHhGRkQwQjA2Ri50b0ludCgpCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
+          ICAgfQogICAgICAgICAgICAgICAgICAgICAgICAgICAgKQogICAgICAgICAgICAgICAgICAgICAg
+          ICAgICAgdG9hc3QoIlYyODAvOSB2aWRlbyArIGF1ZGlvICsgc2FmZXR5ICsgY29udGludWl0eSBz
+          YXZlZCIpCiAgICAgICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgICAgICB9CiAg
+          ICAgICAgICAgICAgICAgICAgZWxzZSAtPiBVbml0CiAgICAgICAgICAgICAgICB9CiAgICAgICAg
+          ICAgIH0KICAgICAgICB9IGNhdGNoICh0OiBUaHJvd2FibGUpIHsKICAgICAgICAgICAgcmVjb3Jk
+          aW5nID0gbnVsbAogICAgICAgICAgICByZWNvcmRCdXR0b24udGV4dCA9ICLil48gUkVDT1JEIgog
+          ICAgICAgICAgICByZWNvcmRCdXR0b24uaXNFbmFibGVkID0gdHJ1ZQogICAgICAgICAgICBzdGF0
+          dXNWaWV3LnRleHQgPSAiUkVDIFNUQVJUICR7dC5qYXZhQ2xhc3Muc2ltcGxlTmFtZX0iCiAgICAg
+          ICAgICAgIHN0YXR1c1ZpZXcuc2V0VGV4dENvbG9yKDB4RkZGRjQxMzgudG9JbnQoKSkKICAgICAg
+          ICAgICAgdG9hc3QoIlJFQyBzdGFydCAke3QuamF2YUNsYXNzLnNpbXBsZU5hbWV9IikKICAgICAg
+          ICB9CiAgICB9CgonJycKcyA9IHNbOnJlY19zdGFydF0gKyBiYXJlX3JlYyArIHNbcmVjX2VuZDpd
+          CmNhbWVyYS53cml0ZV90ZXh0KHMsIGVuY29kaW5nPSd1dGYtOCcpCgpnID0gZ3JhZGxlLnJlYWRf
+          dGV4dChlbmNvZGluZz0ndXRmLTgnKQppZiAndmVyc2lvbkNvZGUgPSAyODA1MCcgbm90IGluIGcg
+          b3IgJ3ZlcnNpb25OYW1lID0gIjI4MC41LXZpZGVvLXBpcGVsaW5lLXNhZmUiJyBub3QgaW4gZzoK
+          ICAgIHJhaXNlIFN5c3RlbUV4aXQoJ1YyODAvOTogdW5leHBlY3RlZCBWMjgwLTUgdmVyc2lvbiBi
+          bG9jaycpCmcgPSBnLnJlcGxhY2UoJ3ZlcnNpb25Db2RlID0gMjgwNTAnLCAndmVyc2lvbkNvZGUg
+          PSAyODA5MCcsIDEpCmcgPSBnLnJlcGxhY2UoJ3ZlcnNpb25OYW1lID0gIjI4MC41LXZpZGVvLXBp
+          cGVsaW5lLXNhZmUiJywgJ3ZlcnNpb25OYW1lID0gIjI4MC45LXJlYy1hdWRpby1zYWZldHktY29u
+          dGludWl0eSInLCAxKQpncmFkbGUud3JpdGVfdGV4dChnLCBlbmNvZGluZz0ndXRmLTgnKQoKY2hl
+          Y2sgPSBjYW1lcmEucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpCmZvciB4IGluIFsKICAgICdW
+          MjgwLzkgUkVDIENPUkUgRElBR05PU1RJQycsCiAgICAnT05MWSB0aGUgc2FmZSBWMjcyIGF1ZGlv
+          LXJvdXRlIGNvbnRpbnVpdHkgbGF5ZXIgaXMgcmVzdG9yZWQgaGVyZS4nLAogICAgJy53aXRoQXVk
+          aW9FbmFibGVkKCknLAogICAgJ0RldmVsb3BVZ2FuZGFWMjc2UmVjb3JkaW5nU2FmZXR5Lm9uUmVj
+          b3JkaW5nU3RhcnRlZCcsCiAgICAnRGV2ZWxvcFVnYW5kYVYyNzZSZWNvcmRpbmdTYWZldHkub25S
+          ZWNvcmRpbmdTdGF0dXMnLAogICAgJ0RldmVsb3BVZ2FuZGFWMjc2UmVjb3JkaW5nU2FmZXR5Lm9u
+          UmVjb3JkaW5nRmluYWxpemVkJywKICAgICdEZXZlbG9wVWdhbmRhVjI3MkZpZWxkU291bmRDb250
+          aW51aXR5LmFybUF1ZGlvTG9jaycsCiAgICAnRGV2ZWxvcFVnYW5kYVYyNzJGaWVsZFNvdW5kQ29u
+          dGludWl0eS5hdWRpb1JvdXRlQ2hhbmdlZCcsCiAgICAnU0FWRUQg4oCiIENPUkUrQVVESU8rU0FG
+          RVRZK0NPTlRJTlVJVFkgT0snLAogICAgJ1F1YWxpdHkuRkhEJwpdOgogICAgaWYgeCBub3QgaW4g
+          Y2hlY2s6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgnVjI4MC85IHZlcmlmaWNhdGlvbiBmYWls
+          ZWQ6ICcgKyB4KQoKcmVjID0gY2hlY2tbCiAgICBjaGVjay5pbmRleCgnICAgIHByaXZhdGUgZnVu
+          IHRvZ2dsZVJlY29yZGluZygpIHsnKToKICAgIGNoZWNrLmluZGV4KCcgICAgcHJpdmF0ZSBmdW4g
+          dGFrZVBob3RvKCkgeycpCl0KCiMgU3RpbGwgZGVmZXJyZWQgZm9yIGxhdGVyIGlzb2xhdGVkIHRl
+          c3RzLgpmb3IgeCBpbiBbCiAgICAndjI1N1JlY29yZGluZ1dhdGNoZG9nUnVubmFibGUnLAogICAg
+          J0xpdmVDb2FjaC5zcGVhaycsCiAgICAnT3ZlcmxheUVmZmVjdCcKXToKICAgIGlmIHggaW4gcmVj
+          OgogICAgICAgIHJhaXNlIFN5c3RlbUV4aXQoJ1YyODAvOSBSRUMgY29yZSBzdGlsbCBjb250YWlu
+          cyBkZWZlcnJlZCBsYXllcjogJyArIHgpCgojIEEgc2Vjb25kIEF1ZGlvUmVjb3JkIGR1cmluZyBD
+          YW1lcmFYIGNhcHR1cmUgaXMgaW50ZW50aW9uYWxseSBmb3JiaWRkZW4uCmlmICdBdWRpb1JlY29y
+          ZC5CdWlsZGVyKCknIGluIHJlYzoKICAgIHJhaXNlIFN5c3RlbUV4aXQoJ1YyODAvOSBtdXN0IG5v
+          dCBvcGVuIGEgc2Vjb25kIEF1ZGlvUmVjb3JkIHdoaWxlIENhbWVyYVggaXMgcmVjb3JkaW5nLicp
+          CgpwcmludCgnUEFTUzogVjI4MC85IGNvcmUgKyBhdWRpbyArIFYyNzYgc2FmZXR5ICsgc2FmZSBW
+          MjcyIGNvbnRpbnVpdHkgaW5zdGFsbGVkLicpCg==
+          V2809_PATCH_B64
+          python3 /tmp/v2806_patch.py
+
+      - name: Apply V280-11 FIX2 full legacy preservation master guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('v172-source')
+          src = root / 'app/src/main/java/com/sentongoharuna/pulse'
+          gradle = root / 'app/build.gradle.kts'
+          manifest = root / 'app/src/main/AndroidManifest.xml'
+
+          if not src.is_dir():
+              raise SystemExit('V280/11 preservation failure: Android source directory is missing')
+          if not gradle.is_file() or not manifest.is_file():
+              raise SystemExit('V280/11 preservation failure: Gradle or AndroidManifest is missing')
+
+          kt_files = sorted(src.glob('*.kt'))
+          source_texts = {}
+          for p in kt_files:
+              source_texts[p.name] = p.read_text(encoding='utf-8', errors='ignore')
+          combined = '\n'.join(source_texts.values())
+          combined_lower = combined.lower()
+
+          audit_lines = [
+              'DEVELOP.UGANDA V280/11 FULL LEGACY PRESERVATION MASTER',
+              'Purpose: fail the build if a protected historical camera/workflow function disappears.',
+              '',
+          ]
+
+          def passed(label, detail=''):
+              line = f'PASS • {label}' + (f' • {detail}' if detail else '')
+              audit_lines.append(line)
+              print(line)
+
+          def require_file(label, filename, min_size=300):
+              p = src / filename
+              if not p.is_file() or p.stat().st_size < min_size:
+                  raise SystemExit(f'V280/11 preservation failure: {label} missing/too small: {p}')
+              passed(label, filename)
+              return p
+
+          def require_all(label, tokens, haystack=combined, case_sensitive=True):
+              h = haystack if case_sensitive else haystack.lower()
+              missing = []
+              for t in tokens:
+                  needle = t if case_sensitive else t.lower()
+                  if needle not in h:
+                      missing.append(t)
+              if missing:
+                  raise SystemExit(f'V280/11 preservation failure: {label} missing signatures: {missing}')
+              passed(label, ', '.join(tokens))
+
+          def require_any(label, alternatives, haystack=combined, case_sensitive=False):
+              h = haystack if case_sensitive else haystack.lower()
+              for token in alternatives:
+                  needle = token if case_sensitive else token.lower()
+                  if needle in h:
+                      passed(label, token)
+                      return token
+              raise SystemExit(f'V280/11 preservation failure: {label} none of signatures found: {alternatives}')
+
+          # -----------------------------------------------------------------
+          # A. CUMULATIVE MODULE FILE GATE — later versions must not delete
+          # the major historical feature modules that the V270→V280 lineage
+          # was built to preserve.
+          # -----------------------------------------------------------------
+          module_files = [
+              ('V255 Pro Monitor / waveform / false color', 'DevelopUgandaV255ProMonitorView.kt'),
+              ('V262 Remote Director', 'DevelopUgandaV262RemoteDirector.kt'),
+              ('V263 Multi-Cam Director', 'DevelopUgandaV263MultiCamDirector.kt'),
+              ('V264 Live Cut Director', 'DevelopUgandaV264LiveCutDirector.kt'),
+              ('V265 Proxy Sync + Review', 'DevelopUgandaV265ProxySyncReview.kt'),
+              ('V269 Smart Story / Field Desk', 'DevelopUgandaV269SmartStoryDesk.kt'),
+              ('V270 Guidance / Action Guard', 'DevelopUgandaV270Guidance.kt'),
+              ('V271 Live Coach / Output Master', 'DevelopUgandaV271LiveCoach.kt'),
+              ('V272 Field Sound + Continuity', 'DevelopUgandaV272FieldSoundContinuity.kt'),
+              ('V273 Motion + Shot Control', 'DevelopUgandaV273MotionShotControl.kt'),
+              ('V274 Media Vault + Delivery', 'DevelopUgandaV274MediaVault.kt'),
+              ('V275 Control Surface + Dual Settings', 'DevelopUgandaV275ControlSurface.kt'),
+              ('V276 Recording Safety + Recovery', 'DevelopUgandaV276RecordingSafety.kt'),
+              ('V277 Lighting + Exposure Intelligence', 'DevelopUgandaV277LightingExposure.kt'),
+              ('V278 Live Workflow', 'DevelopUgandaV278LiveWorkflow.kt'),
+              ('V279 Active Shooting Intelligence', 'DevelopUgandaV279ActiveShooting.kt'),
+              ('V280 Smart Director', 'DevelopUgandaV280SmartDirector.kt'),
+          ]
+          for label, filename in module_files:
+              require_file(label, filename)
+
+          # -----------------------------------------------------------------
+          # B. V235–V250 LOOK / FIELD INTELLIGENCE / EDGE-RULER GATE.
+          # -----------------------------------------------------------------
+          require_any('V235 live LUT / grade panel', [
+              'develop_uganda_v235_live_grade_panel', 'LUTS / Color Grade', 'LUTS'
+          ])
+          require_any('V236 field intelligence', [
+              'develop_uganda_v236_field_intelligence', 'FIELD INTELLIGENCE'
+          ])
+          require_all('V250 iPhone-style edge rulers', [
+              'ZoomRulerView', 'ExposureRulerView', 'v250Cam2DismissAll'
+          ])
+          require_any('V250 ruler show/hide behavior', [
+              'v250HideRulers', 'v250Cam2Show', 'v250EdgeHandler'
+          ])
+
+          # -----------------------------------------------------------------
+          # C. V251–V259 CORE PRO SHOOTING STACK.
+          # -----------------------------------------------------------------
+          require_all('V251 clean master / face exposure / pro assist', [
+              'v251ToggleCleanMaster',
+              'v251ToggleFaceExposurePriority',
+              'v251ToggleProAssist',
+          ])
+          # V280/11 FIX2: V252's original helper names were superseded by the
+          # later V253/V275 settings architecture. Preserve the actual settings
+          # capability lineage rather than obsolete private helper identifiers.
+          require_file('V252/V253/V275 settings host', 'DevelopUgandaV242QualityMatchPro.kt')
+          require_all('V252+ surviving settings architecture', [
+              'v253ExpandableRow', 'v253MovingSwitch', 'v253ChoiceGrid'
+          ])
+          require_file('V275 dual settings/control surface', 'DevelopUgandaV275ControlSurface.kt')
+          require_any('V252 Clean Master route', [
+              'v251ToggleCleanMaster', 'Clean Master', 'CLEAN MASTER'
+          ])
+          require_any('V252 Face Exposure route', [
+              'v251ToggleFaceExposurePriority', 'Face Exposure', 'FACE EXPOSURE'
+          ])
+          require_any('V252 Focus / Zebra assist route', [
+              'v251ToggleProAssist', 'Focus Peaking', 'Zebra', 'ZEBRA'
+          ])
+          require_any('V252 LUT / Grade route', [
+              'develop_uganda_v235_live_grade_panel', 'LUTS', 'Color Grade'
+          ])
+          require_any('V252 Aspect / Format route', [
+              'develop_uganda_v236_field_intelligence', 'ASPECT', 'Aspect', 'Format'
+          ])
+          require_all('V253 expandable tactile settings', [
+              'v253ExpandableRow', 'v253MovingSwitch', 'v253ChoiceGrid'
+          ])
+          require_all('V254 field controls', [
+              'v254SetIso', 'v254SetShutter', 'v254SetWhiteBalance',
+              'v254SetStabilizationPolicy', 'v254TogglePreflight'
+          ])
+          require_all('V255 subject tracking / waveform / false color / focus pull', [
+              'v255SetSubjectTrackingMode',
+              'v255ToggleWaveform',
+              'v255ToggleFalseColor',
+              'v255RunFocusPull',
+          ])
+          require_any('V255 waveform monitor', ['WAVEFORM • LUMA', 'Waveform Monitor'])
+          require_any('V255 false color exposure', ['False Color Exposure', 'falseColorFor'])
+          require_all('V256 tactile switches + timecode', [
+              'v256SetTimecodeMode', 'v256TimecodeModeState'
+          ])
+          require_all('V257 record-core controls', [
+              'v257SetBitrateMode', 'v257BitrateTargetMbps'
+          ])
+          require_any('V258 live workflow home', [
+              'develop_uganda_v258_live_workflow_home',
+              'Workflow Home Motion',
+              'GENERAL WORKFLOW HOME • LIVE MOTION',
+          ])
+          require_any('V258 workflow path animation', [
+              'flow_path_motion', 'Flow Path Animation', 'CAPTURE  →'
+          ])
+          require_all('V259 Smart Shoot core functions', [
+              'v259RecordingConfidenceScore', 'v259SmartShootStatus'
+          ])
+          require_any('V259 exposure/confidence UI lineage', [
+              'Smart Exposure Assist', 'Recording Confidence', 'SMART SHOOT',
+              'V259 SMART SHOOT + MEDIA INTELLIGENCE'
+          ])
+          require_any('V259 best-take lineage', [
+              'Best Take Flags', 'TAKE FLAG', 'BEST'
+          ])
+
+          # -----------------------------------------------------------------
+          # D. V260 PROJECT CONTROL + FAILSAFE.
+          # -----------------------------------------------------------------
+          require_all('V260 project/slate integration', [
+              'v260ProjectName', 'v260CameraName',
+              'v260ActiveSceneNumber', 'v260ActiveTakeNumber'
+          ])
+          require_all('V260 project/failsafe core functions', [
+              'v260ProjectStatus', 'v260SaveCameraPreset'
+          ])
+          require_any('V260 camera presets A/B', [
+              'v260SaveCameraPreset', 'Camera Presets A / B', 'PRESET A', 'PRESET B'
+          ])
+          require_any('V260 storage reservation', [
+              'PROJECT STORAGE RESERVE', 'Storage Reservation', 'storage_reservation'
+          ])
+          require_any('V260 thermal strategy', [
+              'Thermal Strategy', 'QUALITY FIRST', 'ENDURANCE'
+          ])
+          require_any('V260 settings search', [
+              'Search settings •', 'Settings Search', 'search settings', 'project, thermal'
+          ])
+
+          # -----------------------------------------------------------------
+          # E. V261 PROFESSIONAL DIRECTOR MONITOR.
+          # -----------------------------------------------------------------
+          require_any('V261 Director Monitor status', ['v261DirectorMonitorStatus', 'DIRECTOR MONITOR'])
+          require_any('V261 RGB Parade', ['RGB PARADE', 'RGB Parade'])
+          require_any('V261 vectorscope', ['VECTORSCOPE', 'Vectorscope'])
+          require_any('V261 skin tone reference', ['SKIN TONE', 'Skin Tone Reference'])
+          require_any('V261 highlight/shadow assist', ['Highlight + Shadow Assist', 'HIGHLIGHT', 'SHADOW'])
+          require_any('V261 director frame guides', ['Director Frame Guides', '2.39:1', '1.85:1'])
+          require_any('V261 shutter-angle range', ['360°', '270°', '144°'])
+          require_any('V261 anamorphic desqueeze', ['Anamorphic Desqueeze', '1.33x', '2.0x'])
+
+          # -----------------------------------------------------------------
+          # F. V262–V265 REMOTE / MULTI-CAM / LIVE CUT / PROXY REVIEW.
+          # -----------------------------------------------------------------
+          remote = source_texts['DevelopUgandaV262RemoteDirector.kt']
+          require_all('V262 authenticated Remote Director host', [
+              'DevelopUgandaV262RemoteDirectorActivity',
+              'DevelopUgandaV262RemoteServer',
+              'PORT = 8262',
+          ], remote)
+          require_any('V262 remote record / safe stop', ['START RECORD', 'SAFE STOP'], remote)
+          require_any('V262 remote AF/AE/AWB', ['REMOTE AF + AE + AWB', 'AF + AE + AWB'], remote)
+          require_any('V262 remote zoom', ['ZOOM', 'zoom'], remote, case_sensitive=False)
+
+          multicam = source_texts['DevelopUgandaV263MultiCamDirector.kt']
+          require_all('V263 multi-camera synchronized controls', [
+              'SYNC START', 'SYNC SAFE STOP'
+          ], multicam)
+          require_any('V263 2–4 camera grid', ['CAM A', 'CAM B', 'CAM C', 'CAM D'], multicam)
+
+          livecut = source_texts['DevelopUgandaV264LiveCutDirector.kt']
+          require_all('V264 Live Cut transport', ['TAKE', 'CUT'], livecut)
+          require_any('V264 Preview → Program workflow', ['PROGRAM', 'PREVIEW'], livecut)
+          require_any('V264 director cut-list export', ['JSON', 'CSV'], livecut)
+
+          proxy = source_texts['DevelopUgandaV265ProxySyncReview.kt']
+          require_any('V265 proxy review protocol', ['PROXY_META', 'PROXY'], proxy)
+          require_any('V265 proxy integrity / transfer', ['INTEGRITY', 'LOCAL READY', 'TRANSFER'], proxy)
+          require_any('V265 review sync nudge', ['20ms', 'SYNC', 'NUDGE'], proxy)
+          require_all('V265 take-rating vocabulary', ['BEST', 'KEEP', 'RETAKE', 'REJECT'], proxy)
+
+          # -----------------------------------------------------------------
+          # G. V267–V270 FIRST PAGE COMMAND CENTER / STORY / GUIDANCE.
+          # -----------------------------------------------------------------
+          require_all('V267 Live Spec core functions', [
+              'v267DeviceSpecSummary', 'v267ConsumePendingQuickPreset'
+          ])
+          require_any('V267 Live Spec Command Center', [
+              'LIVE SPEC COMMAND CENTER', 'READY TO SHOOT CHECK', 'READY TO SHOOT'
+          ])
+          require_any('V267 first-page readiness / director routing', [
+              'CAMERA HEALTH', 'DIRECTOR', 'REVIEW', 'READY TO SHOOT CHECK'
+          ])
+          require_any('V267 quick-shoot presets', [
+              'NEWS', 'INTERVIEW', 'CINEMA', 'NIGHT', 'SOCIAL', 'v267ConsumePendingQuickPreset'
+          ])
+
+          story = source_texts['DevelopUgandaV269SmartStoryDesk.kt']
+          require_any('V269 Smart Story / Field Desk', ['SMART STORY', 'FIELD DESK'], story)
+          require_all('V269 shot-list workflow', [
+              'OPENING', 'WIDE', 'MEDIUM', 'CLOSE-UP', 'INTERVIEW', 'B-ROLL', 'CLOSING'
+          ], story)
+          require_any('V269 next-shot workflow', ['NEXT SHOT', 'SET NEXT'], story)
+          require_all('V269 take ratings', ['BEST', 'KEEP', 'RETAKE', 'REJECT'], story)
+
+          guidance = source_texts['DevelopUgandaV270Guidance.kt']
+          require_any('V270 chronological workflow guidance', ['PREPARE', 'NEXT ACTION'], guidance)
+          require_any('V270 Action Guard', ['Action Guard', 'ACTION GUARD', 'actionGuard'], guidance)
+          require_any('V270 function audit / verified actions', ['VERIFY ACTIONS', 'FUNCTION AUDIT', 'verify'], guidance)
+
+          # -----------------------------------------------------------------
+          # H. V271–V277 ASSISTANT / SOUND / MOTION / VAULT / SETTINGS /
+          # RECORDING SAFETY / LIGHTING STACK.
+          # -----------------------------------------------------------------
+          require_any('V271 Live Coach', ['DevelopUgandaV271LiveCoach', 'LIVE COACH'])
+          require_any('V271 Clean / Reporter / Branded output modes', [
+              'CLEAN MASTER', 'REPORTER', 'BRANDED'
+          ])
+
+          sound = source_texts['DevelopUgandaV272FieldSoundContinuity.kt']
+          require_all('V272 audio-route continuity', ['armAudioLock', 'audioRouteChanged'], sound)
+          require_any('V272 Field Sound', ['FIELD SOUND', 'CONTINUITY'], sound)
+
+          require_any('V273 Motion + Shot Control', ['MOTION', 'SHOT CONTROL'], source_texts['DevelopUgandaV273MotionShotControl.kt'])
+
+          vault = source_texts['DevelopUgandaV274MediaVault.kt']
+          require_any('V274 Media Vault', ['MEDIA VAULT', 'MediaVault'], vault)
+          require_any('V274 delivery workflow', ['DELIVERY', 'DELIVER', 'SHARE'], vault)
+          require_any('V274 Smart Director vault store bridge', ['DevelopUgandaV274MediaVaultStore', 'MediaVaultStore'])
+
+          control = source_texts['DevelopUgandaV275ControlSurface.kt']
+          require_any('V275 live control surface', ['LIVE CONTROL SURFACE', 'CONTROL SURFACE'], control)
+          require_any('V275 dual settings', ['CAMERA SETTINGS', 'WORKFLOW SETTINGS'])
+
+          safety = source_texts['DevelopUgandaV276RecordingSafety.kt']
+          require_all('V276 recording safety lifecycle', [
+              'onRecordingStarted', 'onRecordingStatus', 'onRecordingFinalized'
+          ], safety)
+          require_any('V276 recovery', ['RECOVERY', 'recover', 'journal'], safety, case_sensitive=False)
+
+          lighting = source_texts['DevelopUgandaV277LightingExposure.kt']
+          require_any('V277 lighting intelligence', ['LIGHT', 'EXPOSURE'], lighting)
+          require_any('V277 tap spot meter', ['spot', 'meter'], lighting)
+
+          # -----------------------------------------------------------------
+          # I. V278–V280 CURRENT INTELLIGENCE STACK.
+          # -----------------------------------------------------------------
+          require_any('V278 live workflow overlay', ['LIVE WORKFLOW', 'WORKFLOW'], source_texts['DevelopUgandaV278LiveWorkflow.kt'])
+
+          active = source_texts['DevelopUgandaV279ActiveShooting.kt']
+          require_all('V279 active shooting intelligence', ['RECORDING HEALTH', 'SHOT MEMORY'], active)
+
+          smart = source_texts['DevelopUgandaV280SmartDirector.kt']
+          require_all('V280 Smart Director sequence coverage', [
+              'COVERAGE', 'NEXT SHOT', 'PROPERTY', 'CONSTRUCTION'
+          ], smart)
+
+          # -----------------------------------------------------------------
+          # J. RECORDING / AUDIO MASTER SAFETY GATE (V280/9 baseline).
+          # CameraX owns the microphone; V276 and safe V272 continuity remain.
+          # -----------------------------------------------------------------
+          cam = source_texts.get('DevelopUgandaCameraActivity.kt', '')
+          require_all('V280/9 CameraX recording + microphone audio', [
+              '.withAudioEnabled()',
+              'DevelopUgandaV276RecordingSafety.onRecordingStarted',
+              'DevelopUgandaV276RecordingSafety.onRecordingFinalized',
+              'DevelopUgandaV272FieldSoundContinuity.armAudioLock',
+              'DevelopUgandaV272FieldSoundContinuity.audioRouteChanged',
+          ], cam)
+          if 'AudioRecord.Builder()' in cam:
+              raise SystemExit('V280/11 safety failure: CameraActivity must not open a second AudioRecord while CameraX records')
+          passed('V280/9 single microphone owner rule', 'no second AudioRecord.Builder() in CameraActivity')
+
+          # -----------------------------------------------------------------
+          # K. UI / ROUTING / MANIFEST PROTECTION.
+          # -----------------------------------------------------------------
+          require_any('Prominent LUTS control preserved', [
+              'LUTS • V235', 'LUTS REMAIN AT TOP-LEFT', 'v275OpenCameraControl("LUTS")'
+          ])
+          require_any('ASPECT / format control preserved', [
+              'ASPECT •', 'v275OpenCameraControl("ASPECT")', 'Aspect / Format'
+          ])
+          if 'bottomDeck.addView(identityRow)' in cam:
+              raise SystemExit('V280/11 UI regression: legacy bottom identity/report bar returned')
+          if 'bottomDeck.addView(settingsSummaryView)' in cam:
+              raise SystemExit('V280/11 UI regression: legacy long bottom settings summary returned')
+          passed('Clean camera deck protection', 'legacy bottom bars remain removed')
+
+          man = manifest.read_text(encoding='utf-8', errors='ignore')
+          require_all('Manifest Remote Director route', ['DevelopUgandaV262RemoteDirectorActivity'], man)
+          activity_count = len(re.findall(r'<activity(?:\s|>)', man))
+          if activity_count < 27:
+              raise SystemExit(f'V280/11 routing regression: only {activity_count} activities declared; expected at least 27')
+          passed('Main workflow manifest route floor', f'{activity_count} activities declared')
+
+          # Version only advances after every preservation gate above passes.
+          g = gradle.read_text(encoding='utf-8')
+          if 'versionCode = 28090' not in g or 'versionName = "280.9-rec-audio-safety-continuity"' not in g:
+              raise SystemExit('V280/11 expected the verified V280/9 version block before master-preservation bump')
+          g = g.replace('versionCode = 28090', 'versionCode = 28110', 1)
+          g = g.replace(
+              'versionName = "280.9-rec-audio-safety-continuity"',
+              'versionName = "280.11-full-legacy-preservation-master"',
+              1,
+          )
+          gradle.write_text(g, encoding='utf-8')
+
+          audit_lines.extend([
+              '',
+              'MASTER RESULT: PASS — FIX2 protected functional legacy stack is present and wired strongly enough for compilation.',
+              'VersionCode: 28110',
+              'VersionName: 280.11-full-legacy-preservation-master',
+              'Baseline rule: future V281+ builds should inherit from this V280/11 FIX2 preservation master.',
+          ])
+          audit = root / 'V280-11-FULL-PRESERVATION-AUDIT.txt'
+          audit.write_text('\n'.join(audit_lines) + '\n', encoding='utf-8')
+          print('PASS: V280/11 FULL LEGACY PRESERVATION MASTER guard completed.')
+          PY
+
+      - name: Verify V280-11 master version and critical recording path
+        shell: bash
+        run: |
+          set -euo pipefail
+          CAM='v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaCameraActivity.kt'
+          GRADLE='v172-source/app/build.gradle.kts'
+          AUDIT='v172-source/V280-11-FULL-PRESERVATION-AUDIT.txt'
+          test -s "$AUDIT"
+          grep -q '.withAudioEnabled()' "$CAM"
+          grep -q 'DevelopUgandaV276RecordingSafety.onRecordingStarted' "$CAM"
+          grep -q 'DevelopUgandaV276RecordingSafety.onRecordingFinalized' "$CAM"
+          grep -q 'DevelopUgandaV272FieldSoundContinuity.armAudioLock' "$CAM"
+          grep -q 'DevelopUgandaV272FieldSoundContinuity.audioRouteChanged' "$CAM"
+          grep -q 'versionCode = 28110' "$GRADLE"
+          grep -q 'versionName = "280.11-full-legacy-preservation-master"' "$GRADLE"
+          grep -q 'MASTER RESULT: PASS' "$AUDIT"
+          echo 'PASS: V280/11 preservation master + recording/audio safety verified.'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build V280-11 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee v28011-build.log
+
+      - name: Prepare V280-11 APK + preservation audit
+        if: success()
+        run: |
+          cp v172-source/app/build/outputs/apk/debug/app-debug.apk \
+            DEVELOP-UGANDA-V280-11-FULL-LEGACY-PRESERVATION-MASTER.apk
+
+      - name: Upload V280-11 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEVELOP-UGANDA-V280-11-FULL-LEGACY-PRESERVATION-MASTER
+          path: DEVELOP-UGANDA-V280-11-FULL-LEGACY-PRESERVATION-MASTER.apk
+          retention-days: 14
+
+      - name: Upload V280-11 preservation audit
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280-11-FULL-PRESERVATION-AUDIT
+          path: v172-source/V280-11-FULL-PRESERVATION-AUDIT.txt
+          retention-days: 14
+
+      - name: Upload V280-11 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280-11-BUILD-LOG
+          path: v172-source/v28011-build.log
+          if-no-files-found: ignore
+          retention-days: 7
