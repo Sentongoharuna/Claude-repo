@@ -1,0 +1,162 @@
+name: Build develop.uganda V280-30.4 FIX2 HAPTIC COMPILE + APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280-30-4-FIX2-HAPTIC-COMPILE-APK.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_30_4_fix2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Replay proven V280-30.4 FIX1 source pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+
+          workflow = Path('.github/workflows/V280-30-4-FIX1-VERIFIER-AND-APK.yml')
+          lines = workflow.read_text(encoding='utf-8').splitlines()
+          target = 'Replay V280-30.4 source pipeline with FIX1 verifier'
+
+          def indent(s):
+              return len(s) - len(s.lstrip(' '))
+
+          start = None
+          step_indent = None
+          for i, line in enumerate(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', line)
+              if m and m.group(2) == target:
+                  start = i
+                  step_indent = len(m.group(1))
+                  break
+          if start is None:
+              raise SystemExit('FIX2 could not locate FIX1 replay step')
+
+          end = len(lines)
+          for i in range(start + 1, len(lines)):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if m and len(m.group(1)) == step_indent:
+                  end = i
+                  break
+
+          run_line = None
+          for i in range(start + 1, end):
+              if lines[i].strip() == 'run: |':
+                  run_line = i
+                  break
+          if run_line is None:
+              raise SystemExit('FIX2 found no runnable FIX1 replay block')
+
+          run_indent = indent(lines[run_line])
+          content_indent = run_indent + 2
+          block = []
+          for line in lines[run_line + 1:end]:
+              if not line.strip():
+                  block.append('')
+                  continue
+              if indent(line) <= run_indent:
+                  break
+              block.append(line[content_indent:] if len(line) >= content_indent else '')
+          script = '\n'.join(block) + '\n'
+
+          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+              f.write(script)
+              tmp = f.name
+          try:
+              result = subprocess.run(['bash', tmp], cwd=str(Path.cwd()), env=os.environ.copy())
+          finally:
+              Path(tmp).unlink(missing_ok=True)
+          if result.returncode:
+              raise SystemExit(result.returncode)
+          print('PASS: FIX1 source pipeline replayed for FIX2 build.')
+          PY
+
+      - name: Apply FIX2 haptic compile correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaGeneralHubActivity.kt')
+          text = p.read_text(encoding='utf-8')
+          fixed, count = re.subn(r'(?<![\w.])performHapticFeedback\(', 'window.decorView.performHapticFeedback(', text)
+          if count == 0:
+              if 'window.decorView.performHapticFeedback(' not in text:
+                  raise SystemExit('FIX2 could not find the haptic call to correct')
+              print('PASS: haptic call was already corrected.')
+          else:
+              p.write_text(fixed, encoding='utf-8')
+              print(f'PASS: corrected {count} bare performHapticFeedback call(s).')
+          PY
+          grep -n "performHapticFeedback" v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaGeneralHubActivity.kt
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build V280-30.4 FIX2 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee v280304-fix2-build.log
+
+      - name: Prepare V280-30.4 FIX2 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DEVELOP-UGANDA-V280-30-4-FIX2-LIVE-PURPOSE-ACTION-HOME.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload V280-30.4 FIX2 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEVELOP-UGANDA-V280-30-4-FIX2-LIVE-PURPOSE-ACTION-HOME
+          path: DEVELOP-UGANDA-V280-30-4-FIX2-LIVE-PURPOSE-ACTION-HOME.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload V280-30.4 FIX2 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280-30-4-FIX2-BUILD-LOG
+          path: v172-source/v280304-fix2-build.log
+          if-no-files-found: ignore
+          retention-days: 7
