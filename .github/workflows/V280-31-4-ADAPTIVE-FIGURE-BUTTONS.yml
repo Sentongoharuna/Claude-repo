@@ -1,0 +1,551 @@
+name: Build develop.uganda V280-31.4 ADAPTIVE FIGURE BUTTONS + APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280-31-4-ADAPTIVE-FIGURE-BUTTONS.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_31_4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Replay V280-30.4 source with corrected verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYREPLAY'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+
+          workflow = Path('.github/workflows/V280-30-4-LIVE-PURPOSE-ACTION-HOME.yml')
+          lines = workflow.read_text(encoding='utf-8').splitlines()
+          start_name = 'Fetch verified V280-12 FIX3 stable recipe'
+          end_name = 'Verify V280-30.4 live action figures dropdowns no-overlap and protected core'
+
+          def indent(s):
+              return len(s) - len(s.lstrip(' '))
+
+          steps = []
+          i = 0
+          while i < len(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if not m:
+                  i += 1
+                  continue
+              step_indent = len(m.group(1))
+              name = m.group(2)
+              end = len(lines)
+              for k in range(i + 1, len(lines)):
+                  mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[k])
+                  if mm and len(mm.group(1)) == step_indent:
+                      end = k
+                      break
+              wd = None
+              script = None
+              for k in range(i + 1, end):
+                  s = lines[k].strip()
+                  if s.startswith('working-directory:'):
+                      wd = s.split(':', 1)[1].strip().strip("'\"")
+                  if s == 'run: |':
+                      run_indent = indent(lines[k])
+                      content_indent = run_indent + 2
+                      block = []
+                      for q in range(k + 1, end):
+                          ln = lines[q]
+                          if not ln.strip():
+                              block.append('')
+                              continue
+                          if indent(ln) <= run_indent:
+                              break
+                          block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                      script = '\n'.join(block) + '\n'
+                      break
+              steps.append((name, wd, script))
+              i = end
+
+          names = [s[0] for s in steps]
+          if start_name not in names or end_name not in names:
+              raise SystemExit('V280-31.4 could not locate V280-30.4 replay boundaries')
+          start = names.index(start_name)
+          finish = names.index(end_name)
+          selected = steps[start:finish + 1]
+          missing = [name for name, _, script in selected if not script]
+          if missing:
+              raise SystemExit('Missing runnable source steps: ' + ', '.join(missing))
+
+          old_check = "grep -Fq 'body.visibility = View.GONE' \"$HUB\""
+          new_check = "grep -Fq 'visibility = View.GONE' \"$HUB\"\ngrep -Fq 'body.visibility = if (open) View.VISIBLE else View.GONE' \"$HUB\""
+
+          root = Path.cwd()
+          fixed = False
+          for name, wd, script in selected:
+              print(f'\n===== V280-31.4 BASE REPLAY: {name} =====', flush=True)
+              if name == end_name:
+                  if script.count(old_check) != 1:
+                      raise SystemExit('Expected one obsolete V280-30.4 dropdown verifier')
+                  script = script.replace(old_check, new_check, 1)
+                  fixed = True
+              work = (root / wd).resolve() if wd else root
+              if wd and not work.exists():
+                  work.mkdir(parents=True, exist_ok=True)
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(script)
+                  tmp = f.name
+              try:
+                  result = subprocess.run(['bash', tmp], cwd=str(work), env=os.environ.copy())
+              finally:
+                  Path(tmp).unlink(missing_ok=True)
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+
+          if not fixed:
+              raise SystemExit('V280-30.4 verifier correction was not applied')
+          print('PASS: V280-30.4 source replayed with corrected verifier.')
+          PYREPLAY
+
+      - name: Apply inherited haptic compile correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYHAPTIC'
+          from pathlib import Path
+          import re
+
+          p = Path('v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaGeneralHubActivity.kt')
+          text = p.read_text(encoding='utf-8')
+          fixed, count = re.subn(
+              r'(?<![\w.])performHapticFeedback\(',
+              'window.decorView.performHapticFeedback(',
+              text
+          )
+          if count:
+              p.write_text(fixed, encoding='utf-8')
+              print(f'PASS: corrected {count} bare haptic call(s).')
+          elif 'window.decorView.performHapticFeedback(' in text:
+              print('PASS: haptic compile correction already present.')
+          else:
+              raise SystemExit('Could not locate the inherited haptic call')
+          PYHAPTIC
+
+      - name: Snapshot protected camera systems before V280-31.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='v172-source/app/src/main/java/com/sentongoharuna/pulse'
+          sha256sum \
+            "$SRC/DevelopUgandaCameraActivity.kt" \
+            "$SRC/DevelopUgandaV262RemoteDirector.kt" \
+            "$SRC/DevelopUgandaV263MultiCamDirector.kt" \
+            "$SRC/DevelopUgandaV264LiveCutDirector.kt" \
+            "$SRC/DevelopUgandaV265ProxySyncReview.kt" \
+            "$SRC/DevelopUgandaV272FieldSoundContinuity.kt" \
+            "$SRC/DevelopUgandaV276RecordingSafety.kt" \
+            "$SRC/DevelopUgandaV242QualityMatchPro.kt" \
+            > /tmp/v280314-protected.sha256
+          echo 'PASS: protected camera/audio/director systems snapshotted.'
+
+      - name: Apply V280-31.4 adaptive figure buttons no-overlap UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY314'
+          from pathlib import Path
+          import re
+
+          ROOT = Path('v172-source')
+          SRC = ROOT / 'app/src/main/java/com/sentongoharuna/pulse'
+          HUB = SRC / 'DevelopUgandaGeneralHubActivity.kt'
+          GRADLE = ROOT / 'app/build.gradle.kts'
+
+          hub = HUB.read_text(encoding='utf-8')
+
+          pattern = re.compile(
+              r'(?P<i>\s*)page\.addView\(buildV28028322FirstPageThirdUpgrade\(\)\)\s*\n'
+              r'(?P=i)page\.addView\(buildV280304FirstPageFourthUpgrade\(\)\)\s*\n'
+              r'(?P=i)page\.addView\(buildV28012ProWorkflowConsole\(\)\)'
+          )
+          replacement = (
+              r'\g<i>page.addView(buildV280314Home3Dropdown())\n'
+              r'\g<i>page.addView(buildV280304FirstPageFourthUpgrade())\n'
+              r'\g<i>page.addView(buildV280314FirstPageFifthUpgrade())\n'
+              r'\g<i>page.addView(buildV28012ProWorkflowConsole())'
+          )
+          hub, n = pattern.subn(replacement, hub, count=1)
+          if n != 1:
+              raise SystemExit(f'V280-31.4 composition target count={n}, expected 1')
+
+          anchor = '    private fun buildV280304FirstPageFourthUpgrade(): View {'
+          if hub.count(anchor) != 1:
+              raise SystemExit('V280-31.4 insertion anchor not unique')
+
+          methods = r'''
+    // V280/31.4 • PREMIUM .3 / .5 BUTTON QUALITY
+    // Dynamic figures move when values change; 2-column weighted rows prevent overlap.
+    private fun v280314Gauge(value: Int): String {
+        val v = value.coerceIn(0, 100)
+        val filled = ((v + 19) / 20).coerceIn(0, 5)
+        return buildString {
+            repeat(filled) { append("●") }
+            repeat(5 - filled) { append("○") }
+        }
+    }
+
+    private fun v280314DynamicButton(
+        label: String,
+        accent: Int,
+        action: () -> Unit
+    ): TextView {
+        return text(label, 8.4f, white, true).apply {
+            gravity = Gravity.CENTER
+            minHeight = dp(58)
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(8), dp(7), dp(8), dp(7))
+            isClickable = true
+            isFocusable = true
+            background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat()
+                setColor(0xFF0A2637.toInt())
+                setStroke(dp(1), accent)
+            }
+            setOnClickListener {
+                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                animate().cancel()
+                scaleX = 0.965f
+                scaleY = 0.965f
+                animate().scaleX(1f).scaleY(1f).setDuration(145).start()
+                v28012SafeUi("V28031.4 $label") { action() }
+            }
+        }
+    }
+
+    private fun v280314SetFigure(
+        view: TextView,
+        label: String,
+        value: String,
+        gaugePercent: Int,
+        animated: Boolean
+    ) {
+        val next = "$label  $value\n${v280314Gauge(gaugePercent)}"
+        if (view.text.toString() == next) return
+        view.text = next
+        if (animated) {
+            view.animate().cancel()
+            view.translationY = -dp(3).toFloat()
+            view.scaleX = 0.975f
+            view.scaleY = 0.975f
+            view.alpha = 0.78f
+            view.animate()
+                .translationY(0f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .alpha(1f)
+                .setDuration(190)
+                .start()
+        }
+    }
+
+    private fun buildV280314Home3Dropdown(): View {
+        val group = v280304Dropdown("HOME .3 • SMART CONTROLS", gold) { body ->
+            body.addView(buildV28028322FirstPageThirdUpgrade())
+        }
+        val header = group.getChildAt(0) as? TextView
+        val ticker = object : Runnable {
+            override fun run() {
+                if (!group.isAttachedToWindow) return
+                val snap = runCatching {
+                    DevelopUgandaV28012ProWorkflowConsole.snapshot(this@DevelopUgandaGeneralHubActivity)
+                }.getOrNull()
+                if (snap != null && header != null) {
+                    val ready = snap.readiness.toInt().coerceIn(0, 100)
+                    val bodyView = group.getChildAt(1)
+                    val open = bodyView.visibility == View.VISIBLE
+                    header.text = "HOME .3 • READY $ready%  " + if (open) "▴" else "▾"
+                    header.animate().cancel()
+                    header.translationX = -dp(2).toFloat()
+                    header.animate().translationX(0f).setDuration(150).start()
+                }
+                group.postDelayed(this, 1800L)
+            }
+        }
+        group.post(ticker)
+        return group
+    }
+
+    private fun buildV280314FirstPageFifthUpgrade(): View {
+        val shell = panelBlock().apply {
+            setPadding(dp(12), dp(11), dp(12), dp(14))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(22).toFloat()
+                setColor(0xFF061D2C.toInt())
+                setStroke(dp(1), cyan)
+            }
+        }
+
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        heading.addView(
+            text("◉ ADAPTIVE FIGURE DECK • HOME UI 5", 10.4f, cyan, true),
+            LinearLayout.LayoutParams(0, dp(38), 1f)
+        )
+        heading.addView(
+            text("31.4", 10.0f, gold, true).apply { gravity = Gravity.CENTER },
+            LinearLayout.LayoutParams(dp(62), dp(38))
+        )
+        shell.addView(heading)
+        shell.addView(
+            text(
+                "Aspect-style response: figures change live, cards move on change, two-column rows never overlap, deeper tools stay folded.",
+                7.0f, muted, false
+            ).apply { setPadding(0, dp(1), 0, dp(9)) }
+        )
+
+        val ready = v280314DynamicButton("READY", green) {
+            val s = runCatching { DevelopUgandaV28012ProWorkflowConsole.snapshot(this) }.getOrNull()
+            if (s != null && s.readiness < 75) {
+                v267Open(DevelopUgandaCameraHealthActivity::class.java)
+            } else {
+                v267Open(DevelopUgandaAllProCameraActivity::class.java)
+            }
+        }
+        val battery = v280314DynamicButton("BATTERY", cyan) {
+            v267Open(DevelopUgandaCameraHealthActivity::class.java)
+        }
+        val storage = v280314DynamicButton("SPACE", gold) {
+            v267Open(DevelopUgandaV274MediaVaultActivity::class.java)
+        }
+        val story = v280314DynamicButton("STORY", cyan) {
+            v267Open(DevelopUgandaV269SmartStoryDeskActivity::class.java)
+        }
+        val coverage = v280314DynamicButton("COVERAGE", green) {
+            v267Open(DevelopUgandaV262RemoteDirectorActivity::class.java)
+        }
+        val delivery = v280314DynamicButton("DELIVERY", gold) {
+            v267Open(DevelopUgandaStoryPackagesActivity::class.java)
+        }
+
+        fun addPair(left: TextView, right: TextView) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 0, 0, dp(7))
+            }
+            row.addView(left, LinearLayout.LayoutParams(0, dp(64), 1f).apply { rightMargin = dp(4) })
+            row.addView(right, LinearLayout.LayoutParams(0, dp(64), 1f).apply { leftMargin = dp(4) })
+            shell.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(71)))
+        }
+        addPair(ready, battery)
+        addPair(storage, story)
+        addPair(coverage, delivery)
+
+        shell.addView(v280304Dropdown("SHOOTING • CAMERA", cyan) { body ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(
+                v280314DynamicButton("OPEN CAMERA", cyan) { v267Open(DevelopUgandaAllProCameraActivity::class.java) },
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { rightMargin = dp(4) }
+            )
+            row.addView(
+                v280314DynamicButton("CAMERA HEALTH", green) { v267Open(DevelopUgandaCameraHealthActivity::class.java) },
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { leftMargin = dp(4) }
+            )
+            body.addView(row)
+        })
+
+        shell.addView(v280304Dropdown("STORY • DIRECT", gold) { body ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(
+                v280314DynamicButton("SMART STORY", gold) { v267Open(DevelopUgandaV269SmartStoryDeskActivity::class.java) },
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { rightMargin = dp(4) }
+            )
+            row.addView(
+                v280314DynamicButton("REMOTE DIRECT", cyan) { v267Open(DevelopUgandaV262RemoteDirectorActivity::class.java) },
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { leftMargin = dp(4) }
+            )
+            body.addView(row)
+        })
+
+        shell.addView(v280304Dropdown("REVIEW • DELIVER", green) { body ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(
+                v280314DynamicButton("MEDIA VAULT", green) { v267Open(DevelopUgandaV274MediaVaultActivity::class.java) },
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { rightMargin = dp(4) }
+            )
+            row.addView(
+                v280314DynamicButton("PACKAGES", gold) { v267Open(DevelopUgandaStoryPackagesActivity::class.java) },
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { leftMargin = dp(4) }
+            )
+            body.addView(row)
+        })
+
+        shell.addView(v280304Dropdown("SYSTEM • SAFETY", cyan) { body ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(
+                v280314DynamicButton("HEALTH", cyan) { v267Open(DevelopUgandaCameraHealthActivity::class.java) },
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { rightMargin = dp(4) }
+            )
+            row.addView(
+                v280314DynamicButton("RECOVERY", gold) { v267Open(DevelopUgandaV276RecoveryCenterActivity::class.java) },
+                LinearLayout.LayoutParams(0, dp(60), 1f).apply { leftMargin = dp(4) }
+            )
+            body.addView(row)
+        })
+
+        var first = true
+        val ticker = object : Runnable {
+            override fun run() {
+                if (!shell.isAttachedToWindow) return
+                val snap = runCatching {
+                    DevelopUgandaV28012ProWorkflowConsole.snapshot(this@DevelopUgandaGeneralHubActivity)
+                }.getOrNull()
+                if (snap != null) {
+                    val r = snap.readiness.toInt().coerceIn(0, 100)
+                    val b = snap.battery.toInt().coerceIn(0, 100)
+                    val gb = snap.freeGb.toInt().coerceAtLeast(0)
+                    val st = snap.storyProgress.toInt().coerceIn(0, 100)
+                    val cv = snap.coverage.toInt().coerceIn(0, 100)
+                    val dq = snap.deliveryQueue.toInt().coerceAtLeast(0)
+                    v280314SetFigure(ready, "READY", "$r%", r, !first)
+                    v280314SetFigure(battery, "BATTERY", "$b%", b, !first)
+                    v280314SetFigure(storage, "SPACE", "${gb}GB", (gb * 5).coerceIn(0, 100), !first)
+                    v280314SetFigure(story, "STORY", "$st%", st, !first)
+                    v280314SetFigure(coverage, "COVER", "$cv%", cv, !first)
+                    v280314SetFigure(delivery, "DELIVER", dq.toString(), if (dq == 0) 100 else 45, !first)
+                    first = false
+                }
+                shell.postDelayed(this, 1400L)
+            }
+        }
+        shell.post(ticker)
+        return shell
+    }
+
+'''
+          hub = hub.replace(anchor, methods + anchor, 1)
+          HUB.write_text(hub, encoding='utf-8')
+
+          gradle = GRADLE.read_text(encoding='utf-8')
+          gradle, n1 = re.subn(r'versionCode\s*=\s*\d+', 'versionCode = 2831400', gradle, count=1)
+          gradle, n2 = re.subn(
+              r'versionName\s*=\s*"[^"]+"',
+              'versionName = "280.31.4-adaptive-figure-buttons"',
+              gradle,
+              count=1
+          )
+          if n1 != 1 or n2 != 1:
+              raise SystemExit(f'Version metadata replacement failed: code={n1}, name={n2}')
+          GRADLE.write_text(gradle, encoding='utf-8')
+
+          print('PASS: V280/31.4 Home .3 dropdown + Home .5 dynamic figure deck installed.')
+          PY314
+
+      - name: Verify V280-31.4 adaptive buttons and preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='v172-source/app/src/main/java/com/sentongoharuna/pulse'
+          HUB="$SRC/DevelopUgandaGeneralHubActivity.kt"
+          GRADLE='v172-source/app/build.gradle.kts'
+
+          sha256sum -c /tmp/v280314-protected.sha256
+
+          grep -Fq 'versionCode = 2831400' "$GRADLE"
+          grep -Fq 'versionName = "280.31.4-adaptive-figure-buttons"' "$GRADLE"
+          grep -Fq 'buildV280314Home3Dropdown()' "$HUB"
+          grep -Fq 'buildV280314FirstPageFifthUpgrade()' "$HUB"
+          grep -Fq 'v280314DynamicButton' "$HUB"
+          grep -Fq 'v280314SetFigure' "$HUB"
+          grep -Fq 'postDelayed(this, 1400L)' "$HUB"
+          grep -Fq 'LinearLayout.LayoutParams(0, dp(64), 1f)' "$HUB"
+          grep -Fq 'maxLines = 2' "$HUB"
+          grep -Fq 'v280304Dropdown("STORY • DIRECT"' "$HUB"
+          grep -Fq 'v280304Dropdown("REVIEW • DELIVER"' "$HUB"
+          grep -Fq 'v280304Dropdown("SYSTEM • SAFETY"' "$HUB"
+          grep -Fq 'window.decorView.performHapticFeedback' "$HUB"
+
+          python3 - <<'PYVERIFY'
+          from pathlib import Path
+          import re
+
+          hub = Path('v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaGeneralHubActivity.kt').read_text(encoding='utf-8')
+          order = [
+              'page.addView(buildV280314Home3Dropdown())',
+              'page.addView(buildV280304FirstPageFourthUpgrade())',
+              'page.addView(buildV280314FirstPageFifthUpgrade())',
+              'page.addView(buildV28012ProWorkflowConsole())',
+          ]
+          positions = [hub.index(x) for x in order]
+          if positions != sorted(positions):
+              raise SystemExit('V280-31.4 first-page order is wrong')
+          if len(re.findall(r'private fun buildV280314FirstPageFifthUpgrade\(', hub)) != 1:
+              raise SystemExit('Home .5 function count is not exactly one')
+          if len(re.findall(r'private fun buildV280314Home3Dropdown\(', hub)) != 1:
+              raise SystemExit('Home .3 dropdown function count is not exactly one')
+          print('PASS: V280/31.4 adaptive moving figures, dropdown layout, no-overlap row contract and protected camera core verified.')
+          PYVERIFY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build V280-31.4 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee v280314-build.log
+
+      - name: Prepare V280-31.4 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DEVELOP-UGANDA-V280-31-4-ADAPTIVE-FIGURE-BUTTONS.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload V280-31.4 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEVELOP-UGANDA-V280-31-4-ADAPTIVE-FIGURE-BUTTONS
+          path: DEVELOP-UGANDA-V280-31-4-ADAPTIVE-FIGURE-BUTTONS.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload V280-31.4 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280-31-4-BUILD-LOG
+          path: v172-source/v280314-build.log
+          if-no-files-found: ignore
+          retention-days: 7
