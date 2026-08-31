@@ -1,0 +1,162 @@
+name: Build develop.uganda V280-5 PRO CAM SAFE MODE LAUNCHER
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280-5-LAUNCHER.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_5_launcher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Fetch verified V280-5 recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            'https://raw.githubusercontent.com/Sentongoharuna/Claude-repo/3324bd4558283334bd5b93225ee9dfd19cf59cdb/.github/workflows/V280-5-PRO-CAM.yml' \
+            -o /tmp/V280-5-PRO-CAM.yml
+          echo 'dab9a31f43408a4fe047efd9bbbab7c4d75dd5505a7ee840c7b3be6d09aa10be  /tmp/V280-5-PRO-CAM.yml' | sha256sum -c -
+          echo 'PASS: verified V280-5 build recipe downloaded.'
+
+      - name: Replay V280-5 source recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess, sys
+
+          recipe = Path('/tmp/V280-5-PRO-CAM.yml')
+          text = recipe.read_text(encoding='utf-8')
+          lines = text.splitlines()
+
+          targets = [
+              'Restore cumulative V270 base',
+              'Apply cumulative V271 V272 V273 V274 source patch',
+              'Apply V275 control surface + dual settings patch',
+              'Apply V276 recording safety + recovery patch',
+              'Apply V277 lighting + exposure intelligence overlay',
+              'Verify V277 preservation and version',
+              'Apply V278 live workflow home overlay',
+              'Apply V279 active shooting intelligence overlay',
+              'Apply V280 Smart Director + sequence coverage overlay',
+              'Verify V280 preservation and Smart Director integration',
+              'Apply V280-5 video pipeline safe-mode hotfix',
+          ]
+
+          def extract_run(name):
+              marker = re.compile(r'^(\s*)-\s+name:\s+' + re.escape(name) + r'\s*$')
+              start = None
+              step_indent = None
+              for i, line in enumerate(lines):
+                  m = marker.match(line)
+                  if m:
+                      start = i
+                      step_indent = len(m.group(1))
+                      break
+              if start is None:
+                  raise SystemExit(f'Missing recipe step: {name}')
+
+              end = len(lines)
+              for i in range(start + 1, len(lines)):
+                  stripped = lines[i].lstrip(' ')
+                  indent = len(lines[i]) - len(stripped)
+                  if stripped.startswith('- name:') and indent == step_indent:
+                      end = i
+                      break
+
+              run_line = None
+              run_indent = None
+              for i in range(start + 1, end):
+                  stripped = lines[i].lstrip(' ')
+                  indent = len(lines[i]) - len(stripped)
+                  if stripped == 'run: |':
+                      run_line = i
+                      run_indent = indent
+                      break
+              if run_line is None:
+                  raise SystemExit(f'No run block found for: {name}')
+
+              block = []
+              content_indent = run_indent + 2
+              for i in range(run_line + 1, end):
+                  line = lines[i]
+                  if not line.strip():
+                      block.append('')
+                      continue
+                  indent = len(line) - len(line.lstrip(' '))
+                  if indent <= run_indent:
+                      break
+                  block.append(line[content_indent:] if len(line) >= content_indent else '')
+              return '\n'.join(block) + '\n'
+
+          for name in targets:
+              print(f'\n===== {name} =====', flush=True)
+              script = extract_run(name)
+              result = subprocess.run(
+                  ['bash', '-euo', 'pipefail', '-c', script],
+                  cwd='.',
+                  text=True
+              )
+              if result.returncode != 0:
+                  raise SystemExit(result.returncode)
+
+          print('\nPASS: V280-5 source recipe replay completed.', flush=True)
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build V280-5 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee v2805-build.log
+
+      - name: Prepare V280-5 APK
+        if: success()
+        run: |
+          cp v172-source/app/build/outputs/apk/debug/app-debug.apk \
+            DEVELOP-UGANDA-V280-5-VIDEO-PIPELINE-SAFE.apk
+
+      - name: Upload V280-5 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEVELOP-UGANDA-V280-5-VIDEO-PIPELINE-SAFE
+          path: DEVELOP-UGANDA-V280-5-VIDEO-PIPELINE-SAFE.apk
+          retention-days: 14
+
+      - name: Upload V280-5 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280-5-BUILD-LOG
+          path: v172-source/v2805-build.log
+          if-no-files-found: ignore
+          retention-days: 7
