@@ -1,0 +1,195 @@
+name: Build V280-1 PRO CAM - Verification Fix
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280-1-FIX-CLAUDE.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_1_fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Fetch verified V280-1 recipe and V270 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/workflows /tmp/v280fresh
+
+          curl --fail --location --retry 3 \
+            'https://raw.githubusercontent.com/Sentongoharuna/kampala-city-live-/main/.github/workflows/V280-1-PRO-CAM.yml' \
+            -o /tmp/v280fresh/V280-1-PRO-CAM.yml
+
+          curl --fail --location --retry 3 \
+            'https://raw.githubusercontent.com/Sentongoharuna/kampala-city-live-/main/.github/workflows/DEVELOP-UGANDA-V270-PRO-CAM-BUILD-PACK.zip' \
+            -o .github/workflows/DEVELOP-UGANDA-V270-PRO-CAM-BUILD-PACK.zip
+
+          test "$(wc -c < .github/workflows/DEVELOP-UGANDA-V270-PRO-CAM-BUILD-PACK.zip)" -eq 718739
+          grep -q 'Build develop.uganda V280-1 PRO CAM SMART DIRECTOR FRESH RUN' /tmp/v280fresh/V280-1-PRO-CAM.yml
+
+          # Correct one verification target in the fetched V280-1 recipe.
+          # V279 Active Shooting is integrated by the General Hub, not by the V280 state-store file.
+          python3 - <<'PYFIX'
+          from pathlib import Path
+          p = Path('/tmp/v280fresh/V280-1-PRO-CAM.yml')
+          s = p.read_text(encoding='utf-8')
+          old = "grep -q 'DevelopUgandaV279ActiveShooting' v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaV280SmartDirector.kt"
+          new = "grep -q 'DevelopUgandaV279ActiveShooting' v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaGeneralHubActivity.kt"
+          if old not in s:
+              raise SystemExit('Expected V280 verification line not found; recipe changed unexpectedly.')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          print('PASS: corrected V280/V279 integration verification target.')
+          PYFIX
+
+          echo 'PASS: verified V280-1 recipe and V270 base downloaded.'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Replay verified V280-1 build recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess, os, sys, tempfile
+
+          recipe = Path('/tmp/v280fresh/V280-1-PRO-CAM.yml')
+          lines = recipe.read_text(encoding='utf-8').splitlines()
+
+          wanted = [
+              'Restore cumulative V270 base',
+              'Apply cumulative V271 V272 V273 V274 source patch',
+              'Apply V275 control surface + dual settings patch',
+              'Apply V276 recording safety + recovery patch',
+              'Apply V277 lighting + exposure intelligence overlay',
+              'Verify V277 preservation and version',
+              'Apply V278 live workflow home overlay',
+              'Apply V279 active shooting intelligence overlay',
+              'Apply V280 Smart Director + sequence coverage overlay',
+              'Verify V280 preservation and Smart Director integration',
+              'Install Android platform',
+              'Build V280 APK',
+              'Prepare V280 APK',
+          ]
+
+          def indent(s):
+              return len(s) - len(s.lstrip(' '))
+
+          steps = {}
+          i = 0
+          while i < len(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if not m:
+                  i += 1
+                  continue
+              step_indent = len(m.group(1))
+              name = m.group(2).strip('"\'')
+              wd = None
+              script = None
+              j = i + 1
+              while j < len(lines):
+                  if re.match(r'^\s*- name:', lines[j]) and indent(lines[j]) == step_indent:
+                      break
+                  stripped = lines[j].strip()
+                  if stripped.startswith('working-directory:'):
+                      wd = stripped.split(':', 1)[1].strip().strip('"\'')
+                  runm = re.match(r'^(\s*)run:\s*\|[-+]?\s*$', lines[j])
+                  if runm:
+                      run_indent = len(runm.group(1))
+                      k = j + 1
+                      block = []
+                      content_indent = None
+                      while k < len(lines):
+                          ln = lines[k]
+                          if ln.strip() and indent(ln) <= run_indent:
+                              break
+                          if ln.strip() and content_indent is None:
+                              content_indent = indent(ln)
+                          if content_indent is None:
+                              block.append('')
+                          else:
+                              block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                          k += 1
+                      script = '\n'.join(block) + '\n'
+                      j = k
+                      continue
+                  inline_run = re.match(r'^\s*run:\s*(.+?)\s*$', lines[j])
+                  if inline_run:
+                      script = inline_run.group(1) + '\n'
+                  j += 1
+              steps[name] = (wd, script)
+              i = j
+
+          missing = [n for n in wanted if n not in steps or not steps[n][1]]
+          if missing:
+              raise SystemExit('Missing recipe steps: ' + ', '.join(missing))
+
+          root = Path.cwd()
+          for n in wanted:
+              wd, script = steps[n]
+              print(f'\n===== V280-1 STEP: {n} =====', flush=True)
+              work = (root / wd).resolve() if wd else root
+              if not work.exists():
+                  raise SystemExit(f'Working directory does not exist for {n}: {work}')
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(script)
+                  p = f.name
+              try:
+                  r = subprocess.run(['bash', p], cwd=str(work), env=os.environ.copy())
+              finally:
+                  Path(p).unlink(missing_ok=True)
+              if r.returncode != 0:
+                  Path('/tmp/v280fresh/failed-step.txt').write_text(n, encoding='utf-8')
+                  sys.exit(r.returncode)
+
+          print('\nPASS: V280-1 recipe completed successfully.', flush=True)
+          PY
+
+      - name: Show V280 compiler errors if build fails
+        if: failure()
+        shell: bash
+        run: |
+          echo "Failed step: $(cat /tmp/v280fresh/failed-step.txt 2>/dev/null || echo unknown)"
+          if [ -f v172-source/v280-build.log ]; then
+            grep -Ein '(^e:|error:|unresolved reference|overload resolution ambiguity|expecting|type mismatch|cannot infer|FAILURE:)' v172-source/v280-build.log | head -5000 || true
+          fi
+
+      - name: Upload V280-1 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEVELOP-UGANDA-V280-1-PRO-CAM
+          path: DEVELOP-UGANDA-V280-1-PRO-CAM.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280-1-FRESH-BUILD-LOG
+          path: |
+            v172-source/v280-build.log
+            /tmp/v280fresh/failed-step.txt
+          if-no-files-found: warn
+          retention-days: 7
