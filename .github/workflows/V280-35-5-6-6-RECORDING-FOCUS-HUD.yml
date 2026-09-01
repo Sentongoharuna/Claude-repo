@@ -1,0 +1,380 @@
+name: Build develop.uganda V280-35.5.6.6 RECORDING FOCUS HUD + APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280-35-5-6-6-RECORDING-FOCUS-HUD.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_35_5_6_6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Replay proven V280-33.4.5.4 clean HUD source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYREPLAY'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+
+          recipe = Path('.github/workflows/V280-33-4-5-4-CLEAN-CINEMA-HUD.yml')
+          lines = recipe.read_text(encoding='utf-8').splitlines()
+          wanted = [
+              'Replay proven V280-31.4 FIX1 source pipeline',
+              'Apply V280-33.4.5.4 clean cinema HUD overlay',
+              'Verify V280-33.4.5.4 clean cinema HUD contract',
+          ]
+
+          def indent(s):
+              return len(s) - len(s.lstrip(' '))
+
+          steps = {}
+          i = 0
+          while i < len(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if not m:
+                  i += 1
+                  continue
+
+              step_indent = len(m.group(1))
+              name = m.group(2)
+              end = len(lines)
+
+              for k in range(i + 1, len(lines)):
+                  mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[k])
+                  if mm and len(mm.group(1)) == step_indent:
+                      end = k
+                      break
+
+              wd = None
+              script = None
+              for k in range(i + 1, end):
+                  s = lines[k].strip()
+                  if s.startswith('working-directory:'):
+                      wd = s.split(':', 1)[1].strip().strip("'\"")
+                  if s == 'run: |':
+                      run_indent = indent(lines[k])
+                      content_indent = run_indent + 2
+                      block = []
+                      for q in range(k + 1, end):
+                          ln = lines[q]
+                          if not ln.strip():
+                              block.append('')
+                              continue
+                          if indent(ln) <= run_indent:
+                              break
+                          block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                      script = '\n'.join(block) + '\n'
+                      break
+
+              steps[name] = (wd, script)
+              i = end
+
+          missing = [n for n in wanted if n not in steps or not steps[n][1]]
+          if missing:
+              raise SystemExit('Missing V280-33 replay steps: ' + ', '.join(missing))
+
+          root = Path.cwd()
+          for name in wanted:
+              wd, script = steps[name]
+              print(f'\n===== V280-35 BASE: {name} =====', flush=True)
+              work = (root / wd).resolve() if wd else root
+              if wd and not work.exists():
+                  work.mkdir(parents=True, exist_ok=True)
+
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(script)
+                  tmp = f.name
+
+              try:
+                  result = subprocess.run(['bash', tmp], cwd=str(work), env=os.environ.copy())
+              finally:
+                  Path(tmp).unlink(missing_ok=True)
+
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+
+          print('PASS: V280-33.4.5.4 clean HUD source replayed.')
+          PYREPLAY
+
+      - name: Apply V280-35.5.6.6 recording focus refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY35566'
+          from pathlib import Path
+          import re
+
+          FILE = Path('v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaV28033454CleanHudProvider.kt')
+          GRADLE = Path('v172-source/app/build.gradle.kts')
+
+          s = FILE.read_text(encoding='utf-8')
+
+          # LIVE CAMERA ONLY: never draw camera HUD over Settings/Setup/etc.
+          old_guard = '''                      override fun onActivityResumed(activity: Activity) {
+                          if (!activity.javaClass.simpleName.contains("Camera", ignoreCase = true)) return
+                          activity.window.decorView.post {
+                              runCatching { CleanCinemaHud.install(activity) }
+                          }
+                      }'''
+
+          new_guard = '''                      override fun onActivityResumed(activity: Activity) {
+                          val screen = activity.javaClass.simpleName
+                          if (!screen.contains("Camera", ignoreCase = true)) return
+
+                          val blocked = listOf(
+                              "Settings",
+                              "Setup",
+                              "Health",
+                              "Review",
+                              "Story",
+                              "Vault",
+                              "Director",
+                              "Recovery",
+                              "Control",
+                              "Console"
+                          )
+                          if (blocked.any { screen.contains(it, ignoreCase = true) }) return
+
+                          activity.window.decorView.post {
+                              runCatching { CleanCinemaHud.install(activity) }
+                          }
+                      }'''
+
+          if s.count(old_guard) != 1:
+              raise SystemExit('V280-35 live-camera guard anchor count is not exactly one')
+          s = s.replace(old_guard, new_guard, 1)
+
+          # New exact version tag.
+          if s.count('private const val TAG = "V28033454_CLEAN_HUD"') != 1:
+              raise SystemExit('V280-35 provider TAG anchor missing')
+          s = s.replace(
+              'private const val TAG = "V28033454_CLEAN_HUD"',
+              'private const val TAG = "V28035566_RECORDING_FOCUS_HUD"',
+              1
+          )
+
+          # Keep one strong gold control family, like ASPECT.
+          s = s.replace(
+              'setStroke(dp(activity, 1), 0x664C5968)',
+              'setStroke(dp(activity, 1), ACCENT)'
+          )
+
+          # Smaller right-side rail.
+          if s.count('FrameLayout.LayoutParams(dp(activity, 82), ViewGroup.LayoutParams.WRAP_CONTENT)') != 1:
+              raise SystemExit('V280-35 right rail size anchor missing')
+          s = s.replace(
+              'FrameLayout.LayoutParams(dp(activity, 82), ViewGroup.LayoutParams.WRAP_CONTENT)',
+              'FrameLayout.LayoutParams(dp(activity, 72), ViewGroup.LayoutParams.WRAP_CONTENT)',
+              1
+          )
+          s = s.replace('railAdd(rec, 72)', 'railAdd(rec, 64)', 1)
+          s = s.replace('railAdd(afae, 58)', 'railAdd(afae, 50)', 1)
+
+          # LENS goes into MORE instead of permanently occupying the rail.
+          rail_block = '''                  railAdd(rec, 64)
+                  railAdd(afae, 50)
+                  railAdd(lens, 58)
+                  railAdd(more, 58)'''
+          rail_new = '''                  railAdd(rec, 64)
+                  railAdd(afae, 50)
+                  lens.visibility = View.GONE
+                  railAdd(more, 50)'''
+          if s.count(rail_block) != 1:
+              raise SystemExit('V280-35 compact rail anchor missing')
+          s = s.replace(rail_block, rail_new, 1)
+
+          more_list = '''                  listOf(
+                      "HEAT" to "HEAT",
+                      "PRO CTRL" to "PRO",
+                      "TOOLS" to "TOOLS",
+                      "SET" to "SET"
+                  ).forEach { (key, label) ->'''
+          more_list_new = '''                  listOf(
+                      "LENS" to "LENS",
+                      "HEAT" to "HEAT",
+                      "PRO CTRL" to "PRO",
+                      "TOOLS" to "TOOLS",
+                      "SET" to "SET"
+                  ).forEach { (key, label) ->'''
+          if s.count(more_list) != 1:
+              raise SystemExit('V280-35 MORE list anchor missing')
+          s = s.replace(more_list, more_list_new, 1)
+
+          # Smaller bottom bar, still LUT / EXPOSURE / FOCUS / MORE.
+          if s.count('FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 66))') != 1:
+              raise SystemExit('V280-35 bottom bar size anchor missing')
+          s = s.replace(
+              'FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 66))',
+              'FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 54))',
+              1
+          )
+          s = s.replace('bottomMargin = dp(activity, 38)', 'bottomMargin = dp(activity, 30)', 1)
+
+          # Slightly smaller text/corners to free more live image.
+          s = s.replace('textSize = 10.5f', 'textSize = 9.6f', 1)
+          s = s.replace('cornerRadius = dp(activity, 13).toFloat()', 'cornerRadius = dp(activity, 12).toFloat()', 1)
+
+          # RECORDING FOCUS MODE:
+          # once recording starts, hide all secondary chrome and leave REC glowing.
+          handler_anchor = '''                  val handler = Handler(Looper.getMainLooper())
+                  var recording = false'''
+
+          handler_new = '''                  val handler = Handler(Looper.getMainLooper())
+
+                  fun enterRecordingFocusMode() {
+                      rightMore.visibility = View.GONE
+                      bottomMore.visibility = View.GONE
+                      afae.visibility = View.GONE
+                      more.visibility = View.GONE
+                      bottom.visibility = View.GONE
+                  }
+
+                  fun exitRecordingFocusMode() {
+                      afae.visibility = View.VISIBLE
+                      more.visibility = View.VISIBLE
+                      bottom.visibility = View.VISIBLE
+                      afae.alpha = 1f
+                      more.alpha = 1f
+                      bottom.alpha = 1f
+                  }
+
+                  var recording = false'''
+
+          if s.count(handler_anchor) != 1:
+              raise SystemExit('V280-35 recording focus insertion anchor missing')
+          s = s.replace(handler_anchor, handler_new, 1)
+
+          # Strong red breathing glow while recording.
+          pulse_old = 'rec.animate().alpha(if (bright) 1f else 0.58f).setDuration(330).start()'
+          pulse_new = 'rec.animate().alpha(if (bright) 1f else 0.36f).scaleX(if (bright) 1.08f else 1f).scaleY(if (bright) 1.08f else 1f).setDuration(300).start()'
+          if s.count(pulse_old) != 1:
+              raise SystemExit('V280-35 REC pulse anchor missing')
+          s = s.replace(pulse_old, pulse_new, 1)
+
+          start_old = '''                      if (recording) {
+                          startedAt = SystemClock.elapsedRealtime()'''
+          start_new = '''                      if (recording) {
+                          enterRecordingFocusMode()
+                          startedAt = SystemClock.elapsedRealtime()'''
+          if s.count(start_old) != 1:
+              raise SystemExit('V280-35 REC start anchor missing')
+          s = s.replace(start_old, start_new, 1)
+
+          stop_old = '''                      } else {
+                          handler.removeCallbacks(pulse)'''
+          stop_new = '''                      } else {
+                          exitRecordingFocusMode()
+                          handler.removeCallbacks(pulse)'''
+          if s.count(stop_old) != 1:
+              raise SystemExit('V280-35 REC stop anchor missing')
+          s = s.replace(stop_old, stop_new, 1)
+
+          # Explicit portrait aspect text.
+          s = s.replace('tv.text = "ASPECT • 9:16"', 'tv.text = "ASPECT\\n9:16"', 1)
+
+          FILE.write_text(s, encoding='utf-8')
+
+          g = GRADLE.read_text(encoding='utf-8')
+          g, n1 = re.subn(r'versionCode\s*=\s*\d+', 'versionCode = 2835666', g, count=1)
+          g, n2 = re.subn(
+              r'versionName\s*=\s*"[^"]+"',
+              'versionName = "280.35.5.6.6-recording-focus-hud"',
+              g,
+              count=1
+          )
+          if n1 != 1 or n2 != 1:
+              raise SystemExit(f'Version metadata update failed: code={n1}, name={n2}')
+          GRADLE.write_text(g, encoding='utf-8')
+
+          print('PASS: V280/35.5.6.6 recording focus HUD applied directly from stable V280-33 base.')
+          PY35566
+
+      - name: Verify V280-35.5.6.6 recording focus HUD
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE='v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaV28033454CleanHudProvider.kt'
+          GRADLE='v172-source/app/build.gradle.kts'
+
+          grep -Fq 'V28035566_RECORDING_FOCUS_HUD' "$FILE"
+          grep -Fq '"Settings",' "$FILE"
+          grep -Fq 'blocked.any { screen.contains(it, ignoreCase = true) }' "$FILE"
+          grep -Fq 'FrameLayout.LayoutParams(dp(activity, 72), ViewGroup.LayoutParams.WRAP_CONTENT)' "$FILE"
+          grep -Fq 'FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 54))' "$FILE"
+          grep -Fq 'lens.visibility = View.GONE' "$FILE"
+          grep -Fq '"LENS" to "LENS"' "$FILE"
+          grep -Fq 'fun enterRecordingFocusMode()' "$FILE"
+          grep -Fq 'bottom.visibility = View.GONE' "$FILE"
+          grep -Fq 'scaleX(if (bright) 1.08f else 1f)' "$FILE"
+          grep -Fq 'ASPECT\n9:16' "$FILE"
+          grep -Fq 'versionCode = 2835666' "$GRADLE"
+          grep -Fq 'versionName = "280.35.5.6.6-recording-focus-hud"' "$GRADLE"
+
+          echo 'PASS: V280/35.5.6.6 live-camera-only, compact gold controls, LENS-in-MORE, 9:16 aspect and recording-focus red glow verified.'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build V280-35.5.6.6 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee v28035566-build.log
+
+      - name: Prepare V280-35.5.6.6 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DEVELOP-UGANDA-V280-35-5-6-6-RECORDING-FOCUS-HUD.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload V280-35.5.6.6 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEVELOP-UGANDA-V280-35-5-6-6-RECORDING-FOCUS-HUD
+          path: DEVELOP-UGANDA-V280-35-5-6-6-RECORDING-FOCUS-HUD.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload V280-35.5.6.6 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280-35-5-6-6-BUILD-LOG
+          path: v172-source/v28035566-build.log
+          if-no-files-found: ignore
+          retention-days: 7
