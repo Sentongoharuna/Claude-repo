@@ -1,0 +1,726 @@
+name: Build develop.uganda V280-35.5.6.6 FIX1 SOLID CAMERA HUD + APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280-35-5-6-6-FIX1-SOLID-CAMERA-HUD.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_35_5_6_6_fix1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Replay proven V280-33.4.5.4 clean HUD source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYREPLAY'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+
+          recipe = Path('.github/workflows/V280-33-4-5-4-CLEAN-CINEMA-HUD.yml')
+          lines = recipe.read_text(encoding='utf-8').splitlines()
+          wanted = [
+              'Replay proven V280-31.4 FIX1 source pipeline',
+              'Apply V280-33.4.5.4 clean cinema HUD overlay',
+              'Verify V280-33.4.5.4 clean cinema HUD contract',
+          ]
+
+          def indent(s):
+              return len(s) - len(s.lstrip(' '))
+
+          steps = {}
+          i = 0
+          while i < len(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if not m:
+                  i += 1
+                  continue
+              step_indent = len(m.group(1))
+              name = m.group(2)
+              end = len(lines)
+
+              for k in range(i + 1, len(lines)):
+                  mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[k])
+                  if mm and len(mm.group(1)) == step_indent:
+                      end = k
+                      break
+
+              wd = None
+              script = None
+              for k in range(i + 1, end):
+                  s = lines[k].strip()
+                  if s.startswith('working-directory:'):
+                      wd = s.split(':', 1)[1].strip().strip("'\"")
+                  if s == 'run: |':
+                      run_indent = indent(lines[k])
+                      content_indent = run_indent + 2
+                      block = []
+                      for q in range(k + 1, end):
+                          ln = lines[q]
+                          if not ln.strip():
+                              block.append('')
+                              continue
+                          if indent(ln) <= run_indent:
+                              break
+                          block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                      script = '\n'.join(block) + '\n'
+                      break
+
+              steps[name] = (wd, script)
+              i = end
+
+          missing = [n for n in wanted if n not in steps or not steps[n][1]]
+          if missing:
+              raise SystemExit('Missing V280-33 replay steps: ' + ', '.join(missing))
+
+          root = Path.cwd()
+          for name in wanted:
+              wd, script = steps[name]
+              print(f'\n===== V280-35 FIX1 BASE: {name} =====', flush=True)
+              work = (root / wd).resolve() if wd else root
+              if wd and not work.exists():
+                  work.mkdir(parents=True, exist_ok=True)
+
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(script)
+                  tmp = f.name
+
+              try:
+                  result = subprocess.run(['bash', tmp], cwd=str(work), env=os.environ.copy())
+              finally:
+                  Path(tmp).unlink(missing_ok=True)
+
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+
+          print('PASS: V280-33.4.5.4 source replayed.')
+          PYREPLAY
+
+      - name: Replace HUD with V280-35.5.6.6 FIX1 solid camera implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='v172-source/app/src/main/java/com/sentongoharuna/pulse'
+          GRADLE='v172-source/app/build.gradle.kts'
+
+          cat > "$SRC/DevelopUgandaV28033454CleanHudProvider.kt" <<'KOTLIN'
+          package com.sentongoharuna.pulse
+
+          import android.app.Activity
+          import android.app.Application
+          import android.content.ContentProvider
+          import android.content.ContentValues
+          import android.database.Cursor
+          import android.graphics.Color
+          import android.graphics.drawable.GradientDrawable
+          import android.net.Uri
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.SystemClock
+          import android.view.Gravity
+          import android.view.HapticFeedbackConstants
+          import android.view.View
+          import android.view.ViewGroup
+          import android.widget.FrameLayout
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import android.widget.Toast
+          import kotlin.math.roundToInt
+
+          class DevelopUgandaV28033454CleanHudProvider : ContentProvider() {
+              override fun onCreate(): Boolean {
+                  val app = context?.applicationContext as? Application ?: return false
+
+                  app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                      override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+                      override fun onActivityStarted(activity: Activity) = Unit
+
+                      override fun onActivityResumed(activity: Activity) {
+                          val screen = activity.javaClass.simpleName
+                          if (!screen.contains("Camera", ignoreCase = true)) return
+
+                          val blocked = listOf(
+                              "Settings",
+                              "Setup",
+                              "Health",
+                              "Review",
+                              "Story",
+                              "Vault",
+                              "Director",
+                              "Recovery",
+                              "Control",
+                              "Console"
+                          )
+
+                          if (blocked.any { screen.contains(it, ignoreCase = true) }) return
+
+                          activity.window.decorView.post {
+                              runCatching { V28035566Hud.install(activity) }
+                          }
+                      }
+
+                      override fun onActivityPaused(activity: Activity) = Unit
+                      override fun onActivityStopped(activity: Activity) = Unit
+                      override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+                      override fun onActivityDestroyed(activity: Activity) = Unit
+                  })
+
+                  return true
+              }
+
+              override fun query(
+                  uri: Uri,
+                  projection: Array<out String>?,
+                  selection: String?,
+                  selectionArgs: Array<out String>?,
+                  sortOrder: String?
+              ): Cursor? = null
+
+              override fun getType(uri: Uri): String? = null
+              override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+              override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
+              override fun update(
+                  uri: Uri,
+                  values: ContentValues?,
+                  selection: String?,
+                  selectionArgs: Array<out String>?
+              ): Int = 0
+          }
+
+          private object V28035566Hud {
+              private const val TAG = "V28035566_FIX1_SOLID_CAMERA_HUD"
+              private const val GOLD = 0xFFFFB323.toInt()
+              private const val RED = 0xFFFF3038.toInt()
+              private const val PANEL = 0xF20A1118.toInt()
+              private const val BUTTON = 0xF20B1219.toInt()
+
+              private fun dp(activity: Activity, value: Int): Int =
+                  (value * activity.resources.displayMetrics.density).roundToInt()
+
+              private fun walk(view: View, out: MutableList<TextView>) {
+                  if (view is TextView) out += view
+                  if (view is ViewGroup) {
+                      for (i in 0 until view.childCount) {
+                          walk(view.getChildAt(i), out)
+                      }
+                  }
+              }
+
+              private fun controlKey(text: String): String? {
+                  val t = text.uppercase().replace("\n", " ").trim()
+                  return when {
+                      t == "REC" || t.startsWith("REC ") -> "REC"
+                      "AF/AE" in t -> "AF/AE"
+                      t == "LENS" || t.startsWith("LENS ") -> "LENS"
+                      "CHECK HEAT" in t -> "HEAT"
+                      "PRO CTRL" in t -> "PRO"
+                      t == "SET" || t.startsWith("SET ") -> "SET"
+                      t == "LUT" || t.startsWith("LUT ") -> "LUT"
+                      t == "EXPOSURE" || t.startsWith("EXPOSURE ") -> "EXPOSURE"
+                      t == "FOCUS" || t.startsWith("FOCUS ") -> "FOCUS"
+                      t == "SOUND" || t.startsWith("SOUND ") -> "SOUND"
+                      t == "REVIEW" || t.startsWith("REVIEW ") -> "REVIEW"
+                      t == "TOOLS" || t.startsWith("TOOLS ") || "TOOLS CLOSED" in t -> "TOOLS"
+                      else -> null
+                  }
+              }
+
+              private fun clickableHost(activity: Activity, text: TextView): View {
+                  val maxW = activity.resources.displayMetrics.widthPixels * 0.45f
+                  val maxH = activity.resources.displayMetrics.heightPixels * 0.20f
+                  var current: View = text
+
+                  repeat(3) {
+                      val parent = current.parent as? View ?: return@repeat
+                      if (
+                          parent.isClickable &&
+                          parent.width in 1..maxW.toInt() &&
+                          parent.height in 1..maxH.toInt()
+                      ) {
+                          current = parent
+                      }
+                  }
+
+                  return current
+              }
+
+              private fun solidButton(
+                  activity: Activity,
+                  title: String,
+                  detail: String = ""
+              ): TextView {
+                  return TextView(activity).apply {
+                      text = if (detail.isBlank()) title else "$title\n$detail"
+                      setTextColor(Color.WHITE)
+                      textSize = 9.4f
+                      gravity = Gravity.CENTER
+                      maxLines = 2
+                      setPadding(dp(activity, 5), dp(activity, 4), dp(activity, 5), dp(activity, 4))
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(activity, 12).toFloat()
+                          setColor(BUTTON)
+                          setStroke(dp(activity, 1), GOLD)
+                      }
+                      elevation = dp(activity, 3).toFloat()
+                      isClickable = true
+                      isFocusable = true
+                  }
+              }
+
+              private fun recButton(activity: Activity): TextView =
+                  solidButton(activity, "REC", "00:00").apply {
+                      background = GradientDrawable().apply {
+                          shape = GradientDrawable.OVAL
+                          setColor(0xF2380509.toInt())
+                          setStroke(dp(activity, 2), RED)
+                      }
+                  }
+
+              fun install(activity: Activity) {
+                  val decor = activity.window.decorView as? ViewGroup ?: return
+                  if (decor.findViewWithTag<View>(TAG) != null) return
+
+                  val screenW = activity.resources.displayMetrics.widthPixels
+                  val screenH = activity.resources.displayMetrics.heightPixels
+
+                  val textViews = mutableListOf<TextView>()
+                  walk(decor, textViews)
+
+                  val targets = linkedMapOf<String, View>()
+
+                  textViews.forEach { tv ->
+                      val raw = tv.text?.toString().orEmpty()
+                      val upper = raw.uppercase()
+
+                      if ("ASPECT" in upper) {
+                          val loc = IntArray(2)
+                          tv.getLocationOnScreen(loc)
+                          if (loc[1] < screenH * 0.20f) {
+                              tv.text = "ASPECT\n9:16"
+                          }
+                      }
+
+                      val key = controlKey(raw) ?: return@forEach
+                      if (key in targets) return@forEach
+
+                      val loc = IntArray(2)
+                      tv.getLocationOnScreen(loc)
+                      val x = loc[0]
+                      val y = loc[1]
+
+                      val rightZone = x > screenW * 0.62f && y > screenH * 0.22f
+                      val bottomZone = y > screenH * 0.62f
+
+                      val replace =
+                          (rightZone && key in setOf("REC", "AF/AE", "LENS", "HEAT", "PRO", "TOOLS", "SET")) ||
+                          (bottomZone && key in setOf("LUT", "EXPOSURE", "FOCUS", "SOUND", "REVIEW", "TOOLS"))
+
+                      if (replace) {
+                          val host = clickableHost(activity, tv)
+                          targets[key] = host
+                          host.visibility = View.INVISIBLE
+                      }
+                  }
+
+                  fun trigger(key: String) {
+                      val target = targets[key]
+                      if (target != null) {
+                          target.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                          target.performClick()
+                      } else {
+                          Toast.makeText(
+                              activity,
+                              "$key unavailable in this camera mode",
+                              Toast.LENGTH_SHORT
+                          ).show()
+                      }
+                  }
+
+                  val overlay = FrameLayout(activity).apply {
+                      tag = TAG
+                      isClickable = false
+                      isFocusable = false
+                  }
+
+                  decor.addView(
+                      overlay,
+                      ViewGroup.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                  )
+
+                  val rightRail = LinearLayout(activity).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER_HORIZONTAL
+                      setPadding(dp(activity, 4), dp(activity, 5), dp(activity, 4), dp(activity, 5))
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(activity, 17).toFloat()
+                          setColor(PANEL)
+                          setStroke(dp(activity, 1), GOLD)
+                      }
+                  }
+
+                  overlay.addView(
+                      rightRail,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 72),
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      ).apply {
+                          gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                          rightMargin = dp(activity, 5)
+                      }
+                  )
+
+                  val rec = recButton(activity)
+                  val afae = solidButton(activity, "AF/AE", "AUTO")
+                  val more = solidButton(activity, "MORE", "⌄")
+
+                  fun railAdd(view: View, height: Int) {
+                      rightRail.addView(
+                          view,
+                          LinearLayout.LayoutParams(
+                              ViewGroup.LayoutParams.MATCH_PARENT,
+                              dp(activity, height)
+                          ).apply {
+                              bottomMargin = dp(activity, 5)
+                          }
+                      )
+                  }
+
+                  railAdd(rec, 64)
+                  railAdd(afae, 50)
+                  railAdd(more, 50)
+
+                  val rightMore = LinearLayout(activity).apply {
+                      orientation = LinearLayout.VERTICAL
+                      visibility = View.GONE
+                      setPadding(dp(activity, 5), dp(activity, 5), dp(activity, 5), dp(activity, 5))
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(activity, 16).toFloat()
+                          setColor(PANEL)
+                          setStroke(dp(activity, 1), GOLD)
+                      }
+                  }
+
+                  overlay.addView(
+                      rightMore,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 92),
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      ).apply {
+                          gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                          rightMargin = dp(activity, 82)
+                      }
+                  )
+
+                  listOf(
+                      "LENS" to "LENS",
+                      "HEAT" to "HEAT",
+                      "PRO" to "PRO",
+                      "TOOLS" to "TOOLS",
+                      "SET" to "SET"
+                  ).forEach { (key, label) ->
+                      val button = solidButton(activity, label)
+                      button.setOnClickListener { trigger(key) }
+                      rightMore.addView(
+                          button,
+                          LinearLayout.LayoutParams(
+                              ViewGroup.LayoutParams.MATCH_PARENT,
+                              dp(activity, 46)
+                          ).apply {
+                              bottomMargin = dp(activity, 4)
+                          }
+                      )
+                  }
+
+                  afae.setOnClickListener { trigger("AF/AE") }
+                  more.setOnClickListener {
+                      rightMore.visibility =
+                          if (rightMore.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                  }
+
+                  val bottomBar = LinearLayout(activity).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER
+                      setPadding(dp(activity, 5), dp(activity, 5), dp(activity, 5), dp(activity, 5))
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(activity, 17).toFloat()
+                          setColor(PANEL)
+                          setStroke(dp(activity, 1), GOLD)
+                      }
+                  }
+
+                  overlay.addView(
+                      bottomBar,
+                      FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          dp(activity, 54)
+                      ).apply {
+                          gravity = Gravity.BOTTOM
+                          leftMargin = dp(activity, 10)
+                          rightMargin = dp(activity, 10)
+                          bottomMargin = dp(activity, 30)
+                      }
+                  )
+
+                  val lut = solidButton(activity, "LUT")
+                  val exposure = solidButton(activity, "EXPOSURE")
+                  val focus = solidButton(activity, "FOCUS")
+                  val moreControls = solidButton(activity, "MORE", "CONTROLS ⌄")
+
+                  fun bottomAdd(view: View) {
+                      bottomBar.addView(
+                          view,
+                          LinearLayout.LayoutParams(
+                              0,
+                              ViewGroup.LayoutParams.MATCH_PARENT,
+                              1f
+                          ).apply {
+                              leftMargin = dp(activity, 2)
+                              rightMargin = dp(activity, 2)
+                          }
+                      )
+                  }
+
+                  bottomAdd(lut)
+                  bottomAdd(exposure)
+                  bottomAdd(focus)
+                  bottomAdd(moreControls)
+
+                  lut.setOnClickListener { trigger("LUT") }
+                  exposure.setOnClickListener { trigger("EXPOSURE") }
+                  focus.setOnClickListener { trigger("FOCUS") }
+
+                  val bottomMore = LinearLayout(activity).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      visibility = View.GONE
+                      gravity = Gravity.CENTER
+                      setPadding(dp(activity, 5), dp(activity, 5), dp(activity, 5), dp(activity, 5))
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(activity, 16).toFloat()
+                          setColor(PANEL)
+                          setStroke(dp(activity, 1), GOLD)
+                      }
+                  }
+
+                  overlay.addView(
+                      bottomMore,
+                      FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          dp(activity, 54)
+                      ).apply {
+                          gravity = Gravity.BOTTOM
+                          leftMargin = dp(activity, 24)
+                          rightMargin = dp(activity, 24)
+                          bottomMargin = dp(activity, 92)
+                      }
+                  )
+
+                  listOf("SOUND", "REVIEW", "TOOLS").forEach { key ->
+                      val button = solidButton(activity, key)
+                      button.setOnClickListener { trigger(key) }
+                      bottomMore.addView(
+                          button,
+                          LinearLayout.LayoutParams(
+                              0,
+                              ViewGroup.LayoutParams.MATCH_PARENT,
+                              1f
+                          ).apply {
+                              leftMargin = dp(activity, 2)
+                              rightMargin = dp(activity, 2)
+                          }
+                      )
+                  }
+
+                  moreControls.setOnClickListener {
+                      bottomMore.visibility =
+                          if (bottomMore.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                  }
+
+                  val handler = Handler(Looper.getMainLooper())
+                  var recording = false
+                  var startedAt = 0L
+                  var bright = true
+
+                  fun enterRecordingFocusMode() {
+                      rightMore.visibility = View.GONE
+                      bottomMore.visibility = View.GONE
+                      afae.visibility = View.GONE
+                      more.visibility = View.GONE
+                      bottomBar.visibility = View.GONE
+                  }
+
+                  fun exitRecordingFocusMode() {
+                      afae.visibility = View.VISIBLE
+                      more.visibility = View.VISIBLE
+                      bottomBar.visibility = View.VISIBLE
+                      afae.alpha = 1f
+                      more.alpha = 1f
+                      bottomBar.alpha = 1f
+                  }
+
+                  val pulse = object : Runnable {
+                      override fun run() {
+                          if (!recording || !rec.isAttachedToWindow) return
+
+                          val elapsed = (SystemClock.elapsedRealtime() - startedAt) / 1000L
+                          val minutes = elapsed / 60L
+                          val seconds = elapsed % 60L
+                          rec.text = "REC\n%02d:%02d".format(minutes, seconds)
+
+                          bright = !bright
+                          rec.animate().cancel()
+                          rec.animate()
+                              .alpha(if (bright) 1f else 0.36f)
+                              .scaleX(if (bright) 1.08f else 1f)
+                              .scaleY(if (bright) 1.08f else 1f)
+                              .setDuration(300)
+                              .start()
+
+                          handler.postDelayed(this, 400L)
+                      }
+                  }
+
+                  rec.setOnClickListener {
+                      trigger("REC")
+                      recording = !recording
+
+                      if (recording) {
+                          enterRecordingFocusMode()
+                          startedAt = SystemClock.elapsedRealtime()
+
+                          rec.background = GradientDrawable().apply {
+                              shape = GradientDrawable.OVAL
+                              setColor(0xF248050A.toInt())
+                              setStroke(dp(activity, 3), RED)
+                          }
+
+                          handler.removeCallbacks(pulse)
+                          handler.post(pulse)
+                      } else {
+                          exitRecordingFocusMode()
+                          handler.removeCallbacks(pulse)
+                          rec.animate().cancel()
+                          rec.alpha = 1f
+                          rec.scaleX = 1f
+                          rec.scaleY = 1f
+                          rec.text = "REC\n00:00"
+                      }
+                  }
+              }
+          }
+          KOTLIN
+
+          python3 - <<'PYVERSION'
+          from pathlib import Path
+          import re
+
+          gradle = Path('v172-source/app/build.gradle.kts')
+          g = gradle.read_text(encoding='utf-8')
+
+          g, n1 = re.subn(r'versionCode\s*=\s*\d+', 'versionCode = 2835667', g, count=1)
+          g, n2 = re.subn(
+              r'versionName\s*=\s*"[^"]+"',
+              'versionName = "280.35.5.6.6-fix1-solid-camera-hud"',
+              g,
+              count=1
+          )
+
+          if n1 != 1 or n2 != 1:
+              raise SystemExit(f'Version metadata update failed: code={n1}, name={n2}')
+
+          gradle.write_text(g, encoding='utf-8')
+          print('PASS: V280/35.5.6.6 FIX1 version metadata updated.')
+          PYVERSION
+
+      - name: Verify V280-35.5.6.6 FIX1 solid HUD
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE='v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaV28033454CleanHudProvider.kt'
+          GRADLE='v172-source/app/build.gradle.kts'
+
+          grep -Fq 'V28035566_FIX1_SOLID_CAMERA_HUD' "$FILE"
+          grep -Fq '"Settings",' "$FILE"
+          grep -Fq 'blocked.any { screen.contains(it, ignoreCase = true) }' "$FILE"
+          grep -Fq 'ASPECT\n9:16' "$FILE"
+          grep -Fq 'railAdd(rec, 64)' "$FILE"
+          grep -Fq 'railAdd(afae, 50)' "$FILE"
+          grep -Fq '"LENS" to "LENS"' "$FILE"
+          grep -Fq 'FrameLayout.LayoutParams(' "$FILE"
+          grep -Fq 'dp(activity, 54)' "$FILE"
+          grep -Fq 'fun enterRecordingFocusMode()' "$FILE"
+          grep -Fq 'bottomBar.visibility = View.GONE' "$FILE"
+          grep -Fq '.scaleX(if (bright) 1.08f else 1f)' "$FILE"
+          grep -Fq 'versionCode = 2835667' "$GRADLE"
+          grep -Fq 'versionName = "280.35.5.6.6-fix1-solid-camera-hud"' "$GRADLE"
+
+          echo 'PASS: V280/35.5.6.6 FIX1 live-camera-only solid gold HUD and recording focus mode verified.'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build V280-35.5.6.6 FIX1 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee v28035566-fix1-build.log
+
+      - name: Prepare V280-35.5.6.6 FIX1 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DEVELOP-UGANDA-V280-35-5-6-6-FIX1-SOLID-CAMERA-HUD.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload V280-35.5.6.6 FIX1 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEVELOP-UGANDA-V280-35-5-6-6-FIX1-SOLID-CAMERA-HUD
+          path: DEVELOP-UGANDA-V280-35-5-6-6-FIX1-SOLID-CAMERA-HUD.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload V280-35.5.6.6 FIX1 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280-35-5-6-6-FIX1-BUILD-LOG
+          path: v172-source/v28035566-fix1-build.log
+          if-no-files-found: ignore
+          retention-days: 7
