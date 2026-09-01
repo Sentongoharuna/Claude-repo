@@ -1,0 +1,1004 @@
+name: Build develop.uganda V280/44.7.8.16.7.8.16 FULL APP POLISH HUD + APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280/44.7.8.16-7-8-16-FULL-APP-POLISH-HUD.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_44_8_9_17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Replay proven V280-33.4.5.4 clean HUD source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYREPLAY'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+
+          recipe = Path('.github/workflows/V280-33-4-5-4-CLEAN-CINEMA-HUD.yml')
+          lines = recipe.read_text(encoding='utf-8').splitlines()
+          wanted = [
+              'Replay proven V280-31.4 FIX1 source pipeline',
+              'Apply V280-33.4.5.4 clean cinema HUD overlay',
+              'Verify V280-33.4.5.4 clean cinema HUD contract',
+          ]
+
+          def indent(s):
+              return len(s) - len(s.lstrip(' '))
+
+          steps = {}
+          i = 0
+          while i < len(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if not m:
+                  i += 1
+                  continue
+              step_indent = len(m.group(1))
+              name = m.group(2)
+              end = len(lines)
+              for k in range(i + 1, len(lines)):
+                  mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[k])
+                  if mm and len(mm.group(1)) == step_indent:
+                      end = k
+                      break
+
+              script = None
+              for k in range(i + 1, end):
+                  if lines[k].strip() == 'run: |':
+                      run_indent = indent(lines[k])
+                      content_indent = run_indent + 2
+                      block = []
+                      for q in range(k + 1, end):
+                          ln = lines[q]
+                          if not ln.strip():
+                              block.append('')
+                              continue
+                          if indent(ln) <= run_indent:
+                              break
+                          block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                      script = '\n'.join(block) + '\n'
+                      break
+
+              steps[name] = script
+              i = end
+
+          missing = [n for n in wanted if n not in steps or not steps[n]]
+          if missing:
+              raise SystemExit('Missing V280-33 replay steps: ' + ', '.join(missing))
+
+          for name in wanted:
+              print(f'\n===== V280/44.7.8.16.7.8.16 BASE: {name} =====', flush=True)
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(steps[name])
+                  tmp = f.name
+              try:
+                  result = subprocess.run(['bash', tmp], cwd=str(Path.cwd()), env=os.environ.copy())
+              finally:
+                  Path(tmp).unlink(missing_ok=True)
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+
+          print('PASS: stable V280-33.4.5.4 source replayed.')
+          PYREPLAY
+
+      - name: Replace HUD with V280/44.7.8.16.7.8.16 full-app polish REC-safe minimal implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='v172-source/app/src/main/java/com/sentongoharuna/pulse'
+          GRADLE='v172-source/app/build.gradle.kts'
+
+          cat > "$SRC/DevelopUgandaV28033454CleanHudProvider.kt" <<'KOTLIN'
+          package com.sentongoharuna.pulse
+
+          import android.app.Activity
+          import android.app.Application
+          import android.content.ContentProvider
+          import android.content.ContentValues
+          import android.database.Cursor
+          import android.graphics.Color
+          import android.graphics.drawable.GradientDrawable
+          import android.net.Uri
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.SystemClock
+          import android.view.Gravity
+          import android.view.HapticFeedbackConstants
+          import android.view.MotionEvent
+          import android.view.View
+          import android.view.ViewGroup
+          import android.widget.FrameLayout
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import android.widget.Toast
+          import kotlin.math.roundToInt
+
+          class DevelopUgandaV28033454CleanHudProvider : ContentProvider() {
+              override fun onCreate(): Boolean {
+                  val app = context?.applicationContext as? Application ?: return false
+
+                  app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                      override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+                      override fun onActivityStarted(activity: Activity) = Unit
+
+                      override fun onActivityResumed(activity: Activity) {
+                          val screen = activity.javaClass.simpleName
+                          val blockedCameraPages = listOf(
+                              "Settings", "Setup", "Health", "Review", "Story",
+                              "Vault", "Director", "Recovery", "Control", "Console"
+                          )
+
+                          activity.window.decorView.post {
+                              val isLiveCamera =
+                                  screen.contains("Camera", ignoreCase = true) &&
+                                  blockedCameraPages.none { screen.contains(it, ignoreCase = true) }
+
+                              if (isLiveCamera) {
+                                  runCatching { V280448917Hud.install(activity) }
+                              } else {
+                                  runCatching { V280448917PagePolish.install(activity) }
+                              }
+                          }
+                      }
+
+                      override fun onActivityPaused(activity: Activity) = Unit
+                      override fun onActivityStopped(activity: Activity) = Unit
+                      override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+                      override fun onActivityDestroyed(activity: Activity) = Unit
+                  })
+
+                  return true
+              }
+
+              override fun query(
+                  uri: Uri,
+                  projection: Array<out String>?,
+                  selection: String?,
+                  selectionArgs: Array<out String>?,
+                  sortOrder: String?
+              ): Cursor? = null
+
+              override fun getType(uri: Uri): String? = null
+              override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+              override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
+              override fun update(
+                  uri: Uri,
+                  values: ContentValues?,
+                  selection: String?,
+                  selectionArgs: Array<out String>?
+              ): Int = 0
+          }
+
+
+          private object V280448917PagePolish {
+              private const val TAG = "V280448917_PAGE_POLISH"
+              private const val GOLD = 0xFFFFB323.toInt()
+              private const val PANEL = 0xF2070D14.toInt()
+              private const val BUTTON = 0xF20A1118.toInt()
+
+              private fun dp(activity: Activity, value: Int): Int =
+                  (value * activity.resources.displayMetrics.density).roundToInt()
+
+              private fun walk(view: View, out: MutableList<TextView>) {
+                  if (view is TextView) out += view
+                  if (view is ViewGroup) {
+                      for (i in 0 until view.childCount) walk(view.getChildAt(i), out)
+                  }
+              }
+
+              private fun screenTitle(activity: Activity): String {
+                  val raw = activity.javaClass.simpleName
+                      .replace("Activity", "")
+                      .replace("Screen", "")
+                      .replace(Regex("([a-z])([A-Z])"), "$1 $2")
+                      .trim()
+
+                  return when {
+                      raw.contains("Settings", ignoreCase = true) -> "SETTINGS"
+                      raw.contains("Setup", ignoreCase = true) -> "SETUP"
+                      raw.contains("Health", ignoreCase = true) -> "HEALTH"
+                      raw.contains("Review", ignoreCase = true) -> "REVIEW"
+                      raw.contains("Story", ignoreCase = true) -> "STORY"
+                      raw.contains("Vault", ignoreCase = true) -> "VAULT"
+                      raw.contains("Director", ignoreCase = true) -> "DIRECTOR"
+                      raw.contains("Recovery", ignoreCase = true) -> "RECOVERY"
+                      raw.contains("Control", ignoreCase = true) -> "CONTROL"
+                      raw.contains("Console", ignoreCase = true) -> "CONSOLE"
+                      raw.contains("Tool", ignoreCase = true) -> "TOOLS"
+                      raw.contains("Home", ignoreCase = true) -> "HOME"
+                      raw.isBlank() -> "DEVELOP UGANDA"
+                      else -> raw.uppercase().take(24)
+                  }
+              }
+
+              private fun card(activity: Activity): GradientDrawable =
+                  GradientDrawable().apply {
+                      cornerRadius = dp(activity, 12).toFloat()
+                      setColor(BUTTON)
+                      setStroke(dp(activity, 1), GOLD)
+                  }
+
+              fun install(activity: Activity) {
+                  val decor = activity.window.decorView as? ViewGroup ?: return
+                  if (decor.findViewWithTag<View>(TAG) != null) return
+
+                  val overlay = FrameLayout(activity).apply {
+                      tag = TAG
+                      isClickable = false
+                      isFocusable = false
+                      setBackgroundColor(Color.TRANSPARENT)
+                  }
+                  decor.addView(
+                      overlay,
+                      ViewGroup.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                  )
+
+                  // Consistent page identity and version on every non-camera screen.
+                  val header = LinearLayout(activity).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                      setPadding(
+                          dp(activity, 10),
+                          dp(activity, 4),
+                          dp(activity, 8),
+                          dp(activity, 4)
+                      )
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(activity, 12).toFloat()
+                          setColor(PANEL)
+                          setStroke(dp(activity, 1), GOLD)
+                      }
+                      isClickable = false
+                  }
+
+                  val title = TextView(activity).apply {
+                      text = screenTitle(activity)
+                      setTextColor(Color.WHITE)
+                      textSize = 11f
+                      gravity = Gravity.CENTER_VERTICAL
+                      isClickable = false
+                  }
+
+                  val version = TextView(activity).apply {
+                      text = "V280/44.8.9.17"
+                      setTextColor(GOLD)
+                      textSize = 9f
+                      gravity = Gravity.CENTER
+                      setPadding(dp(activity, 7), 0, dp(activity, 7), 0)
+                      background = card(activity)
+                      isClickable = false
+                  }
+
+                  header.addView(
+                      title,
+                      LinearLayout.LayoutParams(
+                          0,
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          1f
+                      )
+                  )
+                  header.addView(
+                      version,
+                      LinearLayout.LayoutParams(
+                          dp(activity, 102),
+                          dp(activity, 30)
+                      )
+                  )
+
+                  overlay.addView(
+                      header,
+                      FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          dp(activity, 42)
+                      ).apply {
+                          gravity = Gravity.TOP
+                          leftMargin = dp(activity, 8)
+                          rightMargin = dp(activity, 8)
+                          topMargin = dp(activity, 8)
+                      }
+                  )
+
+                  // Bring buttons and action rows into the same compact gold family across pages.
+                  val textViews = mutableListOf<TextView>()
+                  walk(decor, textViews)
+
+                  textViews.forEach { tv ->
+                      if (tv === title || tv === version) return@forEach
+                      val raw = tv.text?.toString()?.trim().orEmpty()
+                      if (raw.isBlank() || raw.length > 32) return@forEach
+
+                      val parent = tv.parent as? View
+                      val isAction =
+                          tv.isClickable ||
+                          parent?.isClickable == true ||
+                          raw.uppercase() in setOf(
+                              "SAVE", "APPLY", "DONE", "OPEN", "CLOSE", "BACK",
+                              "NEXT", "START", "STOP", "RESET", "REVIEW", "TOOLS",
+                              "SETTINGS", "SETUP", "HEALTH", "DIRECTOR"
+                          )
+
+                      if (isAction) {
+                          tv.setPadding(
+                              dp(activity, 7),
+                              dp(activity, 5),
+                              dp(activity, 7),
+                              dp(activity, 5)
+                          )
+                          if (tv.background == null) {
+                              tv.background = card(activity)
+                          }
+                      }
+                  }
+              }
+          }
+
+          private object V280448917Hud {
+              private const val TAG = "V280448917_FULL_APP_POLISH_HUD"
+              private const val GOLD = 0xFFFFB323.toInt()
+              private const val RED = 0xFFFF3038.toInt()
+              private const val PANEL = 0xF0070D14.toInt()
+              private const val BUTTON = 0xF20A1118.toInt()
+              private const val SAFE = 0xFF7FE39B.toInt()
+              private const val WARN = 0xFFFFB323.toInt()
+
+              private fun dp(activity: Activity, value: Int): Int =
+                  (value * activity.resources.displayMetrics.density).roundToInt()
+
+              private fun walk(view: View, out: MutableList<TextView>) {
+                  if (view is TextView) out += view
+                  if (view is ViewGroup) {
+                      for (i in 0 until view.childCount) walk(view.getChildAt(i), out)
+                  }
+              }
+
+              private fun keyFor(text: String): String? {
+                  val t = text.uppercase().replace("\n", " ").trim()
+                  return when {
+                      t == "REC" || t.startsWith("REC ") -> "REC"
+                      "AF/AE" in t -> "AF/AE"
+                      t == "LENS" || t.startsWith("LENS ") -> "LENS"
+                      "CHECK HEAT" in t -> "HEAT"
+                      "PRO CTRL" in t -> "PRO"
+                      t == "SET" || t.startsWith("SET ") -> "SET"
+                      t == "LUT" || t.startsWith("LUT ") -> "LUT"
+                      t == "EXPOSURE" || t.startsWith("EXPOSURE ") -> "EXPOSURE"
+                      t == "FOCUS" || t.startsWith("FOCUS ") -> "FOCUS"
+                      t == "SOUND" || t.startsWith("SOUND ") -> "SOUND"
+                      t == "REVIEW" || t.startsWith("REVIEW ") -> "REVIEW"
+                      t == "TOOLS" || t.startsWith("TOOLS ") || "TOOLS CLOSED" in t -> "TOOLS"
+                      else -> null
+                  }
+              }
+
+              private fun clickableHost(activity: Activity, text: TextView): View {
+                  val maxW = activity.resources.displayMetrics.widthPixels * 0.45f
+                  val maxH = activity.resources.displayMetrics.heightPixels * 0.20f
+                  var current: View = text
+                  repeat(3) {
+                      val parent = current.parent as? View ?: return@repeat
+                      if (
+                          parent.isClickable &&
+                          parent.width in 1..maxW.toInt() &&
+                          parent.height in 1..maxH.toInt()
+                      ) current = parent
+                  }
+                  return current
+              }
+
+              private fun solid(activity: Activity, title: String, detail: String = ""): TextView =
+                  TextView(activity).apply {
+                      text = if (detail.isBlank()) title else "$title\n$detail"
+                      setTextColor(Color.WHITE)
+                      textSize = 8.0f
+                      gravity = Gravity.CENTER
+                      maxLines = 2
+                      setPadding(dp(activity, 3), dp(activity, 3), dp(activity, 3), dp(activity, 3))
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(activity, 10).toFloat()
+                          setColor(BUTTON)
+                          setStroke(dp(activity, 1), GOLD)
+                      }
+                      elevation = dp(activity, 2).toFloat()
+                      isClickable = true
+                      isFocusable = true
+                  }
+
+              private fun recButton(activity: Activity): TextView =
+                  solid(activity, "REC", "00:00").apply {
+                      background = GradientDrawable().apply {
+                          shape = GradientDrawable.OVAL
+                          setColor(0xF23D0509.toInt())
+                          setStroke(dp(activity, 2), RED)
+                      }
+                  }
+
+              private fun warningState(textViews: List<TextView>): Pair<Boolean, String> {
+                  val all = textViews.joinToString(" | ") { it.text?.toString().orEmpty().uppercase() }
+                  return when {
+                      "BATTERY LOW" in all -> true to "LOW BAT"
+                      "OVERHEAT" in all || "THERMAL HIGH" in all || "TOO HOT" in all -> true to "HEAT"
+                      "MIC LOCK" !in all && "MIC READY" !in all -> true to "MIC?"
+                      else -> false to "SAFE"
+                  }
+              }
+
+              fun install(activity: Activity) {
+                  val decor = activity.window.decorView as? ViewGroup ?: return
+                  if (decor.findViewWithTag<View>(TAG) != null) return
+
+                  val w = activity.resources.displayMetrics.widthPixels
+                  val h = activity.resources.displayMetrics.heightPixels
+
+                  val textViews = mutableListOf<TextView>()
+                  walk(decor, textViews)
+
+                  val targets = linkedMapOf<String, View>()
+
+                  fun hideBottomCrowd(tv: TextView) {
+                      val raw = tv.text?.toString().orEmpty()
+                      val upper = raw.uppercase().replace("\n", " ").trim()
+                      if (upper.isBlank()) return
+
+                      val loc = IntArray(2)
+                      tv.getLocationOnScreen(loc)
+                      val y = loc[1]
+                      if (y < h * 0.68f) return
+
+                      val remove =
+                          ("READY" in upper && "WATCH" in upper) ||
+                          upper == "TOOLS" ||
+                          upper.startsWith("TOOLS ") ||
+                          "CHECK BEFORE REC" in upper
+
+                      if (!remove) return
+
+                      var victim: View = tv
+                      repeat(3) {
+                          val parent = victim.parent as? View ?: return@repeat
+                          val pw = parent.width
+                          val ph = parent.height
+                          if (
+                              pw in 1..w &&
+                              ph in 1..(h * 0.22f).toInt()
+                          ) {
+                              victim = parent
+                          }
+                      }
+                      victim.visibility = View.GONE
+                  }
+
+                  textViews.forEach { hideBottomCrowd(it) }
+
+                  textViews.forEach { tv ->
+                      val raw = tv.text?.toString().orEmpty()
+                      val upper = raw.uppercase()
+
+                      if ("ASPECT" in upper) {
+                          val loc = IntArray(2)
+                          tv.getLocationOnScreen(loc)
+                          if (loc[1] < h * 0.20f) tv.text = "ASPECT\n9:16"
+                      }
+
+                      val key = keyFor(raw) ?: return@forEach
+                      if (key in targets) return@forEach
+
+                      val loc = IntArray(2)
+                      tv.getLocationOnScreen(loc)
+                      val x = loc[0]
+                      val y = loc[1]
+
+                      val rightZone = x > w * 0.58f && y > h * 0.18f
+                      val bottomZone = y > h * 0.56f
+
+                      if (rightZone || bottomZone) {
+                          val host = clickableHost(activity, tv)
+                          targets[key] = host
+                          host.visibility = View.GONE
+                      }
+                  }
+
+                  fun trigger(key: String) {
+                      val target = targets[key]
+                      if (target != null) {
+                          target.visibility = View.VISIBLE
+                          target.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                          target.performClick()
+                          target.visibility = View.GONE
+                      } else {
+                          Toast.makeText(activity, "$key unavailable", Toast.LENGTH_SHORT).show()
+                      }
+                  }
+
+                  val overlay = FrameLayout(activity).apply {
+                      tag = TAG
+                      setBackgroundColor(Color.TRANSPARENT)
+                  }
+                  decor.addView(
+                      overlay,
+                      ViewGroup.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                  )
+
+                  // Number every visible build so side-by-side installs are instantly identifiable.
+                  val versionBadge = solid(activity, "V280/44", "8.9.17").apply {
+                      isClickable = false
+                      isFocusable = false
+                  }
+                  overlay.addView(
+                      versionBadge,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 74),
+                          dp(activity, 34)
+                      ).apply {
+                          gravity = Gravity.TOP or Gravity.START
+                          topMargin = dp(activity, 106)
+                          leftMargin = dp(activity, 6)
+                      }
+                  )
+
+                  val rec = recButton(activity)
+                  overlay.addView(
+                      rec,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 52),
+                          dp(activity, 52)
+                      ).apply {
+                          gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                          rightMargin = dp(activity, 4)
+                      }
+                  )
+
+                  val drawerTab = solid(activity, "•", "〈")
+                  overlay.addView(
+                      drawerTab,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 32),
+                          dp(activity, 40)
+                      ).apply {
+                          gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                          rightMargin = dp(activity, 60)
+                      }
+                  )
+
+                  val safePill = solid(activity, "V280/44", "READY").apply {
+                      textSize = 7.4f
+                  }
+                  overlay.addView(
+                      safePill,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 72),
+                          dp(activity, 34)
+                      ).apply {
+                          gravity = Gravity.TOP or Gravity.END
+                          topMargin = dp(activity, 108)
+                          rightMargin = dp(activity, 6)
+                      }
+                  )
+
+                  val drawer = LinearLayout(activity).apply {
+                      orientation = LinearLayout.VERTICAL
+                      visibility = View.GONE
+                      setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4))
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(activity, 13).toFloat()
+                          setColor(PANEL)
+                          setStroke(dp(activity, 1), GOLD)
+                      }
+                  }
+                  overlay.addView(
+                      drawer,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 80),
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      ).apply {
+                          gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                          rightMargin = dp(activity, 98)
+                      }
+                  )
+
+                  listOf(
+                      "AF/AE" to "AF/AE",
+                      "LENS" to "LENS",
+                      "LUT" to "LUT",
+                      "EXPOSURE" to "EXPOSURE",
+                      "FOCUS" to "FOCUS",
+                      "SOUND" to "SOUND",
+                      "REVIEW" to "REVIEW",
+                      "TOOLS" to "TOOLS",
+                      "PRO" to "PRO",
+                      "SET" to "SET"
+                  ).forEach { (key, label) ->
+                      val b = solid(activity, label)
+                      b.setOnClickListener {
+                          trigger(key)
+                          drawer.visibility = View.GONE
+                      }
+                      drawer.addView(
+                          b,
+                          LinearLayout.LayoutParams(
+                              ViewGroup.LayoutParams.MATCH_PARENT,
+                              dp(activity, 34)
+                          ).apply {
+                              bottomMargin = dp(activity, 2)
+                          }
+                      )
+                  }
+
+                  drawerTab.setOnClickListener {
+                      drawer.visibility =
+                          if (drawer.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                  }
+
+                  val exposureMeter = solid(activity, "EXP", "0.0").apply { visibility = View.GONE }
+                  val zoomMeter = solid(activity, "ZOOM", "1.0x").apply { visibility = View.GONE }
+
+                  overlay.addView(
+                      exposureMeter,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 48),
+                          dp(activity, 88)
+                      ).apply {
+                          gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                          leftMargin = dp(activity, 2)
+                      }
+                  )
+                  overlay.addView(
+                      zoomMeter,
+                      FrameLayout.LayoutParams(
+                          dp(activity, 48),
+                          dp(activity, 88)
+                      ).apply {
+                          gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                          rightMargin = dp(activity, 62)
+                      }
+                  )
+
+                  val handler = Handler(Looper.getMainLooper())
+                  var recording = false
+                  var startedAt = 0L
+                  var bright = true
+                  var touchDownAt = 0L
+
+                  val hideTemporary = Runnable {
+                      if (!recording) {
+                          exposureMeter.visibility = View.GONE
+                          zoomMeter.visibility = View.GONE
+                      }
+                  }
+
+                  overlay.setOnTouchListener { _, event ->
+                      if (recording) return@setOnTouchListener false
+
+                      when (event.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              touchDownAt = SystemClock.elapsedRealtime()
+                              when {
+                                  event.x < w * 0.12f -> {
+                                      exposureMeter.visibility = View.VISIBLE
+                                      zoomMeter.visibility = View.GONE
+                                  }
+                                  event.x > w * 0.88f -> {
+                                      zoomMeter.visibility = View.VISIBLE
+                                      exposureMeter.visibility = View.GONE
+                                  }
+                              }
+                              handler.removeCallbacks(hideTemporary)
+                              handler.postDelayed(hideTemporary, 1200L)
+                          }
+
+                          MotionEvent.ACTION_UP -> {
+                              val held = SystemClock.elapsedRealtime() - touchDownAt
+                              if (
+                                  held >= 520L &&
+                                  event.x > w * 0.20f &&
+                                  event.x < w * 0.80f
+                              ) {
+                                  trigger("FOCUS")
+                              }
+                          }
+                      }
+                      false
+                  }
+
+                  val safetyTicker = object : Runnable {
+                      override fun run() {
+                          if (!overlay.isAttachedToWindow) return
+
+                          val (warn, reason) = warningState(textViews)
+
+                          if (!recording) {
+                              safePill.text = if (warn) "V280/44\n$reason" else "V280/44\nREADY"
+                              safePill.background = GradientDrawable().apply {
+                                  cornerRadius = dp(activity, 10).toFloat()
+                                  setColor(BUTTON)
+                                  setStroke(dp(activity, 1), if (warn) WARN else SAFE)
+                              }
+
+                              rec.background = GradientDrawable().apply {
+                                  shape = GradientDrawable.OVAL
+                                  setColor(0xF23D0509.toInt())
+                                  setStroke(dp(activity, 2), if (warn) WARN else RED)
+                              }
+                          }
+
+                          handler.postDelayed(this, 900L)
+                      }
+                  }
+                  handler.post(safetyTicker)
+
+                  fun enterRecordMode() {
+                      drawer.visibility = View.GONE
+                      drawerTab.visibility = View.GONE
+                      safePill.visibility = View.GONE
+                      exposureMeter.visibility = View.GONE
+                      zoomMeter.visibility = View.GONE
+                  }
+
+                  fun exitRecordMode() {
+                      drawerTab.visibility = View.VISIBLE
+                      safePill.visibility = View.VISIBLE
+                  }
+
+                  val pulse = object : Runnable {
+                      override fun run() {
+                          if (!recording || !rec.isAttachedToWindow) return
+
+                          val elapsed = (SystemClock.elapsedRealtime() - startedAt) / 1000L
+                          rec.text = "REC\n%02d:%02d".format(elapsed / 60L, elapsed % 60L)
+
+                          bright = !bright
+                          rec.animate().cancel()
+                          rec.animate()
+                              .alpha(if (bright) 1f else 0.20f)
+                              .scaleX(if (bright) 1.16f else 1f)
+                              .scaleY(if (bright) 1.16f else 1f)
+                              .setDuration(210)
+                              .start()
+
+                          handler.postDelayed(this, 310L)
+                      }
+                  }
+
+                  rec.setOnClickListener {
+                      val (warn, reason) = warningState(textViews)
+
+                      if (!recording && warn) {
+                          Toast.makeText(activity, "Check $reason before recording", Toast.LENGTH_SHORT).show()
+                      }
+
+                      trigger("REC")
+                      recording = !recording
+
+                      if (recording) {
+                          enterRecordMode()
+                          startedAt = SystemClock.elapsedRealtime()
+                          rec.background = GradientDrawable().apply {
+                              shape = GradientDrawable.OVAL
+                              setColor(0xF266050A.toInt())
+                              setStroke(dp(activity, 3), RED)
+                          }
+                          handler.removeCallbacks(pulse)
+                          handler.post(pulse)
+                      } else {
+                          exitRecordMode()
+                          handler.removeCallbacks(pulse)
+                          rec.animate().cancel()
+                          rec.alpha = 1f
+                          rec.scaleX = 1f
+                          rec.scaleY = 1f
+                          rec.text = "REC\n00:00"
+                      }
+                  }
+              }
+          }
+          KOTLIN
+
+          python3 - <<'PYVERSION'
+          from pathlib import Path
+          import re
+
+          gradle = Path('v172-source/app/build.gradle.kts')
+          g = gradle.read_text(encoding='utf-8')
+          g, n1 = re.subn(r'versionCode\s*=\s*\d+', 'versionCode = 28448917', g, count=1)
+          g, n2 = re.subn(
+              r'versionName\s*=\s*"[^"]+"',
+              'versionName = "280.44.8.9.17-full-app-polish-hud"',
+              g,
+              count=1
+          )
+          if n1 != 1 or n2 != 1:
+              raise SystemExit(f'Version metadata update failed: code={n1}, name={n2}')
+          gradle.write_text(g, encoding='utf-8')
+
+          print('PASS: V280/43.6.7.14 version metadata updated.')
+          PYVERSION
+
+
+      - name: Give V280-43 its own Android app identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYIDENTITY'
+          from pathlib import Path
+          import re
+
+          ROOT = Path('v172-source')
+          GRADLE = ROOT / 'app/build.gradle.kts'
+          MANIFEST = ROOT / 'app/src/main/AndroidManifest.xml'
+          STRINGS = ROOT / 'app/src/main/res/values/strings.xml'
+
+          unique_id = 'com.sentongoharuna.pulse.v280448917'
+          visible_name = 'V280/44.7.8.16.7.8.16 Develop Uganda'
+
+          g = GRADLE.read_text(encoding='utf-8')
+          g, count = re.subn(
+              r'applicationId\s*=\s*"[^"]+"',
+              f'applicationId = "{unique_id}"',
+              g,
+              count=1
+          )
+          if count != 1:
+              raise SystemExit(f'Expected exactly one applicationId, found {count}')
+          GRADLE.write_text(g, encoding='utf-8')
+
+          if STRINGS.exists():
+              s = STRINGS.read_text(encoding='utf-8')
+              if re.search(r'<string\s+name="app_name"[^>]*>.*?</string>', s, flags=re.S):
+                  s = re.sub(
+                      r'<string\s+name="app_name"[^>]*>.*?</string>',
+                      f'<string name="app_name">{visible_name}</string>',
+                      s,
+                      count=1,
+                      flags=re.S
+                  )
+              else:
+                  if '</resources>' not in s:
+                      raise SystemExit('strings.xml has no </resources>')
+                  s = s.replace(
+                      '</resources>',
+                      f'    <string name="app_name">{visible_name}</string>\n</resources>',
+                      1
+                  )
+              STRINGS.write_text(s, encoding='utf-8')
+          else:
+              STRINGS.parent.mkdir(parents=True, exist_ok=True)
+              STRINGS.write_text(
+                  '<?xml version="1.0" encoding="utf-8"?>\n'
+                  '<resources>\n'
+                  f'    <string name="app_name">{visible_name}</string>\n'
+                  '</resources>\n',
+                  encoding='utf-8'
+              )
+
+          m = MANIFEST.read_text(encoding='utf-8')
+          app_match = re.search(r'<application\b[^>]*>', m, flags=re.S)
+          if not app_match:
+              raise SystemExit('AndroidManifest has no <application> tag')
+
+          app_tag = app_match.group(0)
+          if re.search(r'android:label\s*=\s*"[^"]+"', app_tag):
+              new_tag = re.sub(
+                  r'android:label\s*=\s*"[^"]+"',
+                  'android:label="@string/app_name"',
+                  app_tag,
+                  count=1
+              )
+          else:
+              new_tag = app_tag[:-1] + ' android:label="@string/app_name">'
+          m = m[:app_match.start()] + new_tag + m[app_match.end():]
+          MANIFEST.write_text(m, encoding='utf-8')
+
+          print('PASS: V280/44.7.8.16 has its own numbered Android app identity.')
+          print('applicationId:', unique_id)
+          print('launcher name:', visible_name)
+          PYIDENTITY
+
+      - name: Verify V280/44.7.8.16.7.8.16 full-app polish REC-safe minimal HUD
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE='v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaV28033454CleanHudProvider.kt'
+          GRADLE='v172-source/app/build.gradle.kts'
+
+          grep -Fq 'V280448917_FULL_APP_POLISH_HUD' "$FILE"
+          grep -Fq 'V280448917_PAGE_POLISH' "$FILE"
+          grep -Fq 'V280/44.8.9.17' "$FILE"
+          grep -Fq 'screenTitle(activity)' "$FILE"
+          grep -Fq 'raw.contains("Settings", ignoreCase = true)' "$FILE"
+          grep -Fq 'raw.contains("Review", ignoreCase = true)' "$FILE"
+          grep -Fq 'raw.contains("Director", ignoreCase = true)' "$FILE"
+          grep -Fq '"READY" in upper && "WATCH" in upper' "$FILE"
+          grep -Fq 'upper == "TOOLS"' "$FILE"
+          grep -Fq 'victim.visibility = View.GONE' "$FILE"
+          grep -Fq 'solid(activity, "V280/44", "8.9.17")' "$FILE"
+          grep -Fq 'solid(activity, "V280/44", "READY")' "$FILE"
+          grep -Fq 'ASPECT\n9:16' "$FILE"
+          grep -Fq 'warningState(textViews)' "$FILE"
+          grep -Fq '"BATTERY LOW" in all' "$FILE"
+          grep -Fq '"OVERHEAT" in all' "$FILE"
+          grep -Fq 'safePill' "$FILE"
+          grep -Fq 'drawerTab.visibility = View.GONE' "$FILE"
+          grep -Fq 'exposureMeter.visibility = View.VISIBLE' "$FILE"
+          grep -Fq 'zoomMeter.visibility = View.VISIBLE' "$FILE"
+          grep -Fq '.scaleX(if (bright) 1.16f else 1f)' "$FILE"
+          grep -Fq 'versionCode = 28448917' "$GRADLE"
+          grep -Fq 'versionName = "280.44.8.9.17-full-app-polish-hud"' "$GRADLE"
+          grep -Fq 'applicationId = "com.sentongoharuna.pulse.v280448917"' "$GRADLE"
+          grep -Fq '<string name="app_name">V280/44.7.8.16.7.8.16 Develop Uganda</string>' 'v172-source/app/src/main/res/values/strings.xml'
+          grep -Fq 'android:label="@string/app_name"' 'v172-source/app/src/main/AndroidManifest.xml'
+
+          echo 'PASS: V280/43.6.7.14 full-app polish separate-app REC-only HUD, safety-aware REC state, 9:16, tiny drawer, edge controls and stronger recording glow verified.'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build V280/44.7.8.16.7.8.16 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee v280448917-build.log
+
+      - name: Prepare V280/44.7.8.16.7.8.16 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='V280/44.7.8.16-7-8-16-DEVELOP-UGANDA-FULL-APP-CLEANUP.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload V280/44.7.8.16.7.8.16 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280/44.7.8.16-7-8-16-DEVELOP-UGANDA-FULL-APP-CLEANUP
+          path: V280/44.7.8.16-7-8-16-DEVELOP-UGANDA-FULL-APP-CLEANUP.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload V280/44.7.8.16.7.8.16 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: V280/44.7.8.16-7-8-16-BUILD-LOG
+          path: v172-source/v280448917-build.log
+          if-no-files-found: ignore
+          retention-days: 7
