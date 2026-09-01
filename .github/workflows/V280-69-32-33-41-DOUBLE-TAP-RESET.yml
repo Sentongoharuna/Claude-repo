@@ -4658,6 +4658,47 @@ jobs:
           print('launcher name:', visible_name)
           PYIDENTITY
 
+      - name: Fix V280-69.32.33.41 Kotlin local-function ordering
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYKOTLINORDER'
+          from pathlib import Path
+
+          source = Path(
+              'v172-source/app/src/main/java/com/sentongoharuna/pulse/'
+              'DevelopUgandaV28033454CleanHudProvider.kt'
+          )
+          text = source.read_text(encoding='utf-8')
+
+          # Kotlin local functions are visible only after their declaration. These
+          # two buttons are already permanently visible and do not need to wake the
+          # auto-hidden HUD before opening their panels, so remove only their two
+          # premature calls. All later wakeIdleHud() calls remain active.
+          quick = '''        quickAccess.setOnClickListener {
+            wakeIdleHud()
+            removeOldCameraGhosts()'''
+          fixed_quick = '''        quickAccess.setOnClickListener {
+            removeOldCameraGhosts()'''
+          dials = '''        dialsTab.setOnClickListener {
+            wakeIdleHud()
+            val opening = dialPanel.visibility != View.VISIBLE'''
+          fixed_dials = '''        dialsTab.setOnClickListener {
+            val opening = dialPanel.visibility != View.VISIBLE'''
+
+          if text.count(quick) != 1 or text.count(dials) != 1:
+              raise SystemExit('Expected premature wakeIdleHud calls were not found exactly once')
+
+          text = text.replace(quick, fixed_quick, 1).replace(dials, fixed_dials, 1)
+          declaration = text.index('        fun wakeIdleHud() {')
+          before = text[:declaration]
+          if 'wakeIdleHud()' in before:
+              raise SystemExit('A wakeIdleHud call still appears before its local declaration')
+
+          source.write_text(text, encoding='utf-8')
+          print('PASS: premature local-function calls removed; later HUD wake behavior preserved.')
+          PYKOTLINORDER
+
       - name: Verify V280-69.32.33.41 double-tap reset + function-map repair
         shell: bash
         run: |
