@@ -1,0 +1,325 @@
+name: Build DU Camera R010 FIX1 Edge Micro Rulers APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R010-EDGE-MICRO-RULERS-FIX1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_du_camera_r010_fix1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Replay R010 source preparation without broken routing step
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYREPLAY'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+
+          recipe = Path('.github/workflows/BUILD-DU-CAMERA-R010-EDGE-MICRO-RULERS.yml')
+          if not recipe.exists():
+              raise SystemExit(f'Missing source workflow: {recipe}')
+
+          wanted = [
+              'Replay proven V280-33.4.5.4 clean HUD source',
+              'Audit all camera functions before V280-69.32.33.41',
+              'Replace HUD with V280-69.32.33.41 camera function audit and true dial controls',
+              'Give V280-69.32.33.41 its own Android app identity',
+              'Fix V280-69.32.33.41 Kotlin local-function ordering',
+          ]
+
+          lines = recipe.read_text(encoding='utf-8').splitlines()
+
+          def indent(s: str) -> int:
+              return len(s) - len(s.lstrip(' '))
+
+          steps = {}
+          i = 0
+          while i < len(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if not m:
+                  i += 1
+                  continue
+              step_indent = len(m.group(1))
+              name = m.group(2)
+              end = len(lines)
+              for k in range(i + 1, len(lines)):
+                  mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[k])
+                  if mm and len(mm.group(1)) == step_indent:
+                      end = k
+                      break
+
+              wd = None
+              script = None
+              for k in range(i + 1, end):
+                  stripped = lines[k].strip()
+                  if stripped.startswith('working-directory:'):
+                      wd = stripped.split(':', 1)[1].strip().strip("'\"")
+                  if stripped == 'run: |':
+                      run_indent = indent(lines[k])
+                      content_indent = run_indent + 2
+                      block = []
+                      for q in range(k + 1, end):
+                          ln = lines[q]
+                          if not ln.strip():
+                              block.append('')
+                              continue
+                          if indent(ln) <= run_indent:
+                              break
+                          block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                      script = '\n'.join(block) + '\n'
+                      break
+              steps[name] = (wd, script)
+              i = end
+
+          missing = [n for n in wanted if n not in steps or not steps[n][1]]
+          if missing:
+              raise SystemExit('Missing R010 replay steps: ' + ', '.join(missing))
+
+          root = Path.cwd()
+          for name in wanted:
+              wd, script = steps[name]
+              print(f'\n===== R010 FIX1 REPLAY: {name} =====', flush=True)
+              work = (root / wd).resolve() if wd else root
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(script)
+                  temp_script = f.name
+              try:
+                  result = subprocess.run(['bash', temp_script], cwd=str(work), env=os.environ.copy())
+              finally:
+                  Path(temp_script).unlink(missing_ok=True)
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+
+          print('PASS: R010 source preparation replayed through Kotlin ordering fix.')
+          PYREPLAY
+
+      - name: FIX1 repair settings routing with resilient R010 anchor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYBUTTONROUTING'
+          from pathlib import Path
+
+          source = Path(
+              'v172-source/app/src/main/java/com/sentongoharuna/pulse/'
+              'DevelopUgandaV28033454CleanHudProvider.kt'
+          )
+          text = source.read_text(encoding='utf-8')
+
+          # Keep the functional lower status strips, but remove the old blank vertical panel.
+          legacy_token = '"CHECK BEFORE REC" in upper'
+          clean_token = '''"CHECK BEFORE REC" in upper ||
+                            "VERTICAL 9:16" in upper'''
+          if '"VERTICAL 9:16" in upper' not in text:
+              if legacy_token not in text:
+                  raise SystemExit('Legacy cleanup token missing')
+              text = text.replace(legacy_token, clean_token, 1)
+
+          # R010 changed the text immediately before versionBadge, so the old exact
+          # R006/R009 anchor no longer exists. Insert the settings guard before the
+          # stable R010 smart-clean dock marker instead.
+          r010_marker = (
+              '                  // R010 smart clean top dock: wakes on center touch, '
+              'auto-hides after 2.8s.'
+          )
+
+          guard_body = r'''
+                  // Settings is hosted inside the camera Activity. While its own
+                  // CLOSE/BACK control is visible, give that surface all touch input.
+                  fun isVisibleThroughParents(view: View): Boolean {
+                      var current: View? = view
+                      repeat(12) {
+                          val node = current ?: return true
+                          if (node.visibility != View.VISIBLE || node.alpha <= 0.02f) return false
+                          current = node.parent as? View
+                      }
+                      return true
+                  }
+
+                  val settingsRouteHandler = Handler(Looper.getMainLooper())
+                  val settingsRouteGuard = object : Runnable {
+                      override fun run() {
+                          if (!overlay.isAttachedToWindow) return
+                          val live = mutableListOf<TextView>()
+                          walk(decor, live)
+                          val settingsOpen = live.any { tv ->
+                              if (insideNewHud(tv) || !isVisibleThroughParents(tv)) return@any false
+                              val label = tv.text?.toString()?.uppercase()
+                                  ?.replace("\\n", " ")?.trim().orEmpty()
+                              label == "CLOSE" || label == "BACK" || label.startsWith("CLOSE ")
+                          }
+                          overlay.visibility = if (settingsOpen) View.GONE else View.VISIBLE
+                          settingsRouteHandler.postDelayed(this, 180L)
+                      }
+                  }
+                  settingsRouteHandler.post(settingsRouteGuard)
+
+          '''
+
+          if 'val settingsRouteHandler = Handler(Looper.getMainLooper())' not in text:
+              if text.count(r010_marker) != 1:
+                  # Fallback to another R010-stable marker if the comment is edited later.
+                  fallback = '                  val versionBadge = solid(activity, "DU CAM", "R010").apply {'
+                  if text.count(fallback) != 1:
+                      raise SystemExit('R010 settings routing insertion marker missing')
+                  text = text.replace(fallback, guard_body + fallback, 1)
+              else:
+                  text = text.replace(r010_marker, guard_body + r010_marker, 1)
+
+          required = [
+              'val settingsRouteHandler = Handler(Looper.getMainLooper())',
+              'val settingsRouteGuard = object : Runnable',
+              'overlay.visibility = if (settingsOpen) View.GONE else View.VISIBLE',
+              'settingsRouteHandler.postDelayed(this, 180L)',
+              '"VERTICAL 9:16" in upper',
+          ]
+          missing = [token for token in required if token not in text]
+          if missing:
+              raise SystemExit('R010 FIX1 routing verification failed: ' + ', '.join(missing))
+
+          source.write_text(text, encoding='utf-8')
+          print('PASS: R010 FIX1 settings routing inserted using resilient marker.')
+          PYBUTTONROUTING
+
+      - name: Replay R010 verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYVERIFYREPLAY'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+
+          recipe = Path('.github/workflows/BUILD-DU-CAMERA-R010-EDGE-MICRO-RULERS.yml')
+          target = 'Verify V280-69.32.33.41 double-tap reset + function-map repair'
+          lines = recipe.read_text(encoding='utf-8').splitlines()
+
+          def indent(s: str) -> int:
+              return len(s) - len(s.lstrip(' '))
+
+          script = None
+          for i, line in enumerate(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', line)
+              if not m or m.group(2) != target:
+                  continue
+              step_indent = len(m.group(1))
+              end = len(lines)
+              for k in range(i + 1, len(lines)):
+                  mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[k])
+                  if mm and len(mm.group(1)) == step_indent:
+                      end = k
+                      break
+              for k in range(i + 1, end):
+                  if lines[k].strip() == 'run: |':
+                      run_indent = indent(lines[k])
+                      content_indent = run_indent + 2
+                      block = []
+                      for q in range(k + 1, end):
+                          ln = lines[q]
+                          if not ln.strip():
+                              block.append('')
+                              continue
+                          if indent(ln) <= run_indent:
+                              break
+                          block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                      script = '\n'.join(block) + '\n'
+                      break
+              break
+
+          if not script:
+              raise SystemExit('R010 verifier step not found')
+
+          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+              f.write(script)
+              temp_script = f.name
+          try:
+              result = subprocess.run(['bash', temp_script], cwd=str(Path.cwd()), env=os.environ.copy())
+          finally:
+              Path(temp_script).unlink(missing_ok=True)
+          if result.returncode:
+              raise SystemExit(result.returncode)
+
+          source = Path(
+              'v172-source/app/src/main/java/com/sentongoharuna/pulse/'
+              'DevelopUgandaV28033454CleanHudProvider.kt'
+          ).read_text(encoding='utf-8')
+          assert 'val settingsRouteHandler = Handler(Looper.getMainLooper())' in source
+          assert 'overlay.visibility = if (settingsOpen) View.GONE else View.VISIBLE' in source
+          print('PASS: original R010 verification plus FIX1 routing checks passed.')
+          PYVERIFYREPLAY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build DU Camera R010 FIX1 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee du-camera-r010-fix1-build.log
+
+      - name: Prepare DU Camera R010 FIX1 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R010-FIX1.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload R010 camera function audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R010-FIX1-CAMERA-FUNCTION-AUDIT
+          path: /tmp/R010-CAMERA-FUNCTION-AUDIT.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload DU Camera R010 FIX1 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R010-FIX1
+          path: DU-Camera-R010-FIX1.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload R010 FIX1 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R010-FIX1-BUILD-LOG
+          path: v172-source/du-camera-r010-fix1-build.log
+          if-no-files-found: ignore
+          retention-days: 7
