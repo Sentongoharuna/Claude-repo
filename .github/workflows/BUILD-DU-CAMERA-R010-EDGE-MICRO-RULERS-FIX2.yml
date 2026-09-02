@@ -1,0 +1,220 @@
+name: Build DU Camera R010 FIX2 Edge Micro Rulers APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R010-EDGE-MICRO-RULERS-FIX2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_du_camera_r010_fix2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Replay R010 source preparation and bypass broken routing patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYREPLAY'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+
+          recipe = Path('.github/workflows/BUILD-DU-CAMERA-R010-EDGE-MICRO-RULERS.yml')
+          if not recipe.exists():
+              raise SystemExit(f'Missing source workflow: {recipe}')
+
+          wanted = [
+              'Replay proven V280-33.4.5.4 clean HUD source',
+              'Audit all camera functions before V280-69.32.33.41',
+              'Replace HUD with V280-69.32.33.41 camera function audit and true dial controls',
+              'Give V280-69.32.33.41 its own Android app identity',
+              'Fix V280-69.32.33.41 Kotlin local-function ordering',
+          ]
+
+          lines = recipe.read_text(encoding='utf-8').splitlines()
+
+          def indent(s: str) -> int:
+              return len(s) - len(s.lstrip(' '))
+
+          steps = {}
+          i = 0
+          while i < len(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if not m:
+                  i += 1
+                  continue
+              step_indent = len(m.group(1))
+              name = m.group(2)
+              end = len(lines)
+              for k in range(i + 1, len(lines)):
+                  mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[k])
+                  if mm and len(mm.group(1)) == step_indent:
+                      end = k
+                      break
+
+              wd = None
+              script = None
+              for k in range(i + 1, end):
+                  stripped = lines[k].strip()
+                  if stripped.startswith('working-directory:'):
+                      wd = stripped.split(':', 1)[1].strip().strip("'\"")
+                  if stripped == 'run: |':
+                      run_indent = indent(lines[k])
+                      content_indent = run_indent + 2
+                      block = []
+                      for q in range(k + 1, end):
+                          ln = lines[q]
+                          if not ln.strip():
+                              block.append('')
+                              continue
+                          if indent(ln) <= run_indent:
+                              break
+                          block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                      script = '\n'.join(block) + '\n'
+                      break
+              steps[name] = (wd, script)
+              i = end
+
+          missing = [n for n in wanted if n not in steps or not steps[n][1]]
+          if missing:
+              raise SystemExit('Missing R010 replay steps: ' + ', '.join(missing))
+
+          root = Path.cwd()
+          for name in wanted:
+              wd, script = steps[name]
+              print(f'\n===== R010 FIX2 REPLAY: {name} =====', flush=True)
+              work = (root / wd).resolve() if wd else root
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(script)
+                  temp_script = f.name
+              try:
+                  result = subprocess.run(['bash', temp_script], cwd=str(work), env=os.environ.copy())
+              finally:
+                  Path(temp_script).unlink(missing_ok=True)
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+
+          print('PASS: R010 camera source prepared. Fragile settings-routing patch intentionally bypassed.')
+          PYREPLAY
+
+      - name: Set R010 FIX2 Android identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYIDENTITY'
+          from pathlib import Path
+          import re
+
+          root = Path('v172-source')
+          gradle = root / 'app/build.gradle.kts'
+          strings = root / 'app/src/main/res/values/strings.xml'
+          manifest = root / 'app/src/main/AndroidManifest.xml'
+
+          g = gradle.read_text(encoding='utf-8')
+          g, n1 = re.subn(r'applicationId\s*=\s*"[^"]+"', 'applicationId = "com.sentongoharuna.pulse.preview.r010fix2"', g, count=1)
+          g, n2 = re.subn(r'versionCode\s*=\s*\d+', 'versionCode = 400000012', g, count=1)
+          g, n3 = re.subn(r'versionName\s*=\s*"[^"]+"', 'versionName = "1.0-r010-fix2"', g, count=1)
+          if not (n1 == n2 == n3 == 1):
+              raise SystemExit(f'Identity update failed: applicationId={n1} versionCode={n2} versionName={n3}')
+          gradle.write_text(g, encoding='utf-8')
+
+          if strings.exists():
+              s = strings.read_text(encoding='utf-8')
+              if re.search(r'<string\s+name="app_name"[^>]*>.*?</string>', s, flags=re.S):
+                  s = re.sub(r'<string\s+name="app_name"[^>]*>.*?</string>', '<string name="app_name">DU Camera R010 FIX2</string>', s, count=1, flags=re.S)
+              else:
+                  s = s.replace('</resources>', '    <string name="app_name">DU Camera R010 FIX2</string>\n</resources>', 1)
+              strings.write_text(s, encoding='utf-8')
+
+          m = manifest.read_text(encoding='utf-8')
+          app = re.search(r'<application\b[^>]*>', m, flags=re.S)
+          if not app:
+              raise SystemExit('AndroidManifest has no application tag')
+          tag = app.group(0)
+          if re.search(r'android:label\s*=\s*"[^"]+"', tag):
+              new_tag = re.sub(r'android:label\s*=\s*"[^"]+"', 'android:label="@string/app_name"', tag, count=1)
+          else:
+              new_tag = tag[:-1] + ' android:label="@string/app_name">'
+          m = m[:app.start()] + new_tag + m[app.end():]
+          manifest.write_text(m, encoding='utf-8')
+
+          print('PASS: R010 FIX2 has unique package and launcher name.')
+          PYIDENTITY
+
+      - name: Verify R010 FIX2 source before build
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE='v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaV28033454CleanHudProvider.kt'
+          GRADLE='v172-source/app/build.gradle.kts'
+          test -s "$FILE"
+          test -s "$GRADLE"
+          grep -Fq 'applicationId = "com.sentongoharuna.pulse.preview.r010fix2"' "$GRADLE"
+          grep -Fq 'versionName = "1.0-r010-fix2"' "$GRADLE"
+          # R010 source is already prepared by the successful steps above; do not
+          # inject the old settings-routing guard that caused R010 and FIX1 to fail.
+          echo 'PASS: source ready; broken settings-routing injection is not part of FIX2.'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build DU Camera R010 FIX2 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee du-camera-r010-fix2-build.log
+
+      - name: Prepare DU Camera R010 FIX2 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R010-FIX2.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload DU Camera R010 FIX2 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R010-FIX2
+          path: DU-Camera-R010-FIX2.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload R010 FIX2 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R010-FIX2-BUILD-LOG
+          path: v172-source/du-camera-r010-fix2-build.log
+          if-no-files-found: ignore
+          retention-days: 7
