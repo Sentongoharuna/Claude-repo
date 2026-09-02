@@ -1,0 +1,185 @@
+name: Build DU Camera R014 FIX1 DFV238 MASTER STABLE APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R014-FIX1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_du_camera_r014_fix1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Prepare corrected R014 dfv238 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYFIX'
+          from pathlib import Path
+          import base64
+          import os
+          import re
+          import subprocess
+          import tempfile
+
+          workflow = Path('.github/workflows/BUILD-DU-CAMERA-R014-DFV238-MASTER-STABLE.yml')
+          if not workflow.exists():
+              raise SystemExit(f'R014 base workflow missing: {workflow}')
+
+          lines = workflow.read_text(encoding='utf-8').splitlines()
+
+          def indent(s: str) -> int:
+              return len(s) - len(s.lstrip(' '))
+
+          def extract_step(name: str) -> str:
+              for i, line in enumerate(lines):
+                  m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', line)
+                  if not m or m.group(2) != name:
+                      continue
+                  step_indent = len(m.group(1))
+                  end = len(lines)
+                  for j in range(i + 1, len(lines)):
+                      mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[j])
+                      if mm and len(mm.group(1)) == step_indent:
+                          end = j
+                          break
+                  for j in range(i + 1, end):
+                      if lines[j].strip() == 'run: |':
+                          run_indent = indent(lines[j])
+                          content_indent = run_indent + 2
+                          block = []
+                          for k in range(j + 1, end):
+                              ln = lines[k]
+                              if not ln.strip():
+                                  block.append('')
+                                  continue
+                              if indent(ln) <= run_indent:
+                                  break
+                              block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                          return '\n'.join(block) + '\n'
+              raise SystemExit(f'Could not extract R014 step: {name}')
+
+          def run_step(label: str, script: str) -> None:
+              print(f'\n===== R014 FIX1: {label} =====', flush=True)
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(script)
+                  tmp = f.name
+              try:
+                  result = subprocess.run(
+                      ['bash', tmp],
+                      cwd=str(Path.cwd()),
+                      env=os.environ.copy(),
+                  )
+              finally:
+                  Path(tmp).unlink(missing_ok=True)
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+
+          replay = extract_step('Replay proven V280-33.4.5.4 clean HUD source')
+          run_step('Replay proven source', replay)
+
+          restore = extract_step('Restore dfv238 master camera law and remove late HUD provider')
+          match = re.search(
+              r"echo '([A-Za-z0-9+/=]+)' \| base64 -d > /tmp/dfv238_reset_master\.py",
+              restore,
+          )
+          if not match:
+              raise SystemExit('R014 dfv238 reset payload was not found')
+
+          payload = base64.b64decode(match.group(1)).decode('utf-8')
+          bad_root = 'ROOT = Path(__file__).resolve().parent'
+          good_root = 'ROOT = Path.cwd()'
+          if bad_root not in payload and good_root not in payload:
+              raise SystemExit('R014 reset payload has an unknown ROOT expression')
+          payload = payload.replace(bad_root, good_root, 1)
+
+          fixed_b64 = base64.b64encode(payload.encode('utf-8')).decode('ascii')
+          restore = restore[:match.start(1)] + fixed_b64 + restore[match.end(1):]
+          run_step('Restore dfv238 with corrected repository root', restore)
+
+          stamp = extract_step('Stamp R014 stable identity and audit dfv238 master contract')
+          run_step('Stamp R014 identity and audit master contract', stamp)
+
+          camera = Path('v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaCameraActivity.kt')
+          shell = Path('v172-source/app/src/main/java/com/sentongoharuna/pulse/DevelopUgandaDfv238CameraShell.kt')
+          gradle = Path('v172-source/app/build.gradle.kts')
+          for path in (camera, shell, gradle):
+              if not path.exists():
+                  raise SystemExit(f'R014 FIX1 required source missing after repair: {path}')
+
+          print('PASS: R014 FIX1 corrected the /tmp project-root bug and prepared buildable dfv238 source.')
+          PYFIX
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build DU Camera R014 FIX1 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee du-camera-r014-fix1-build.log
+
+      - name: Prepare DU Camera R014 FIX1 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R014-FIX1-DFV238-MASTER-STABLE.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload R014 dfv238 master audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R014-FIX1-DFV238-MASTER-AUDIT
+          path: /tmp/R014-DFV238-MASTER-AUDIT.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload DU Camera R014 FIX1 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R014-FIX1-DFV238-MASTER-STABLE
+          path: DU-Camera-R014-FIX1-DFV238-MASTER-STABLE.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload R014 FIX1 build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R014-FIX1-BUILD-LOG
+          path: v172-source/du-camera-r014-fix1-build.log
+          if-no-files-found: warn
+          retention-days: 7
