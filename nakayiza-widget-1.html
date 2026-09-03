@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#111217">
+<title>NAKAYIZA Widget</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#111217; --panel:#1b1d23; --line:#2c2f36; --txt:#d8d9da; --dim:#8e8e93;
+    --green:#299c46; --g2:#7eb26d; --orange:#eb7b18; --yellow:#e5ac0e; --blue:#33b5e5; --pink:#e02f44;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--txt);font-family:Roboto,Arial,sans-serif;
+    padding:8px;display:flex;flex-direction:column;gap:6px;overflow:hidden}
+
+  .head{display:flex;align-items:baseline;gap:8px}
+  .brand{color:var(--orange);font-weight:700;font-size:13px;letter-spacing:.4px}
+  .month{font-size:10px;color:var(--dim)}
+  .time{margin-left:auto;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+
+  .main{display:flex;gap:8px;align-items:center;flex:1;min-height:0}
+  .gauge{flex:0 0 96px}
+  .nums{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:3px 8px;min-width:0}
+  .lab{font-size:9px;color:var(--dim)}
+  .val{font-size:16px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums}
+  .c-green{color:var(--g2)}.c-blue{color:var(--blue)}.c-red{color:var(--pink)}.c-yellow{color:var(--yellow)}
+
+  .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--g2)}
+  .barlab{display:flex;justify-content:space-between;font-size:9.5px;color:var(--dim);margin-top:2px}
+
+  .strip{display:grid;grid-template-columns:repeat(14,1fr);gap:2px}
+  .cell{border-radius:2px;text-align:center;font-size:8.5px;font-weight:700;color:#fff;padding:3px 0;background:var(--green)}
+  .cell.warn{background:var(--yellow)} .cell.bad{background:#d44a3a}
+</style>
+</head>
+<body>
+
+<!-- ============ EDIT FIGURES HERE (same DATA as the big dashboards) ============ -->
+<script>
+const MONTH_LABEL = "September 2026";
+const DATA = [
+ { id:"A",  units:41, occ:36, payable:14500000, crt:1200000, adv:600000,  col:9800000 },
+ { id:"B",  units:26, occ:24, payable:9800000,  crt:800000,  adv:300000,  col:7100000 },
+ { id:"C",  units:43, occ:39, payable:16200000, crt:1500000, adv:500000,  col:11400000 },
+ { id:"D",  units:44, occ:40, payable:16800000, crt:900000,  adv:700000,  col:12300000 },
+ { id:"E",  units:29, occ:25, payable:10400000, crt:600000,  adv:200000,  col:6900000 },
+ { id:"F",  units:40, occ:37, payable:15100000, crt:1100000, adv:400000,  col:10800000 },
+ { id:"G",  units:55, occ:49, payable:20600000, crt:1700000, adv:900000,  col:14200000 },
+ { id:"H",  units:38, occ:33, payable:13900000, crt:700000,  adv:300000,  col:9100000 },
+ { id:"I",  units:38, occ:34, payable:14100000, crt:900000,  adv:500000,  col:9600000 },
+ { id:"J",  units:26, occ:22, payable:9200000,  crt:400000,  adv:200000,  col:5700000 },
+ { id:"K",  units:30, occ:26, payable:10900000, crt:600000,  adv:300000,  col:7300000 },
+ { id:"L",  units:45, occ:40, payable:17400000, crt:1300000, adv:600000,  col:12100000 },
+ { id:"M",  units:21, occ:19, payable:8600000,  crt:500000,  adv:400000,  col:6200000 },
+ { id:"Stalls", units:38, occ:35, payable:7600000, crt:300000, adv:200000, col:5400000 },
+];
+</script>
+<!-- ============================================================================ -->
+
+<div class="head">
+  <div class="brand">⚡ NAKAYIZA</div>
+  <div class="month" id="month">—</div>
+  <div class="time" id="time">—</div>
+</div>
+
+<div class="main">
+  <div class="gauge" id="g"></div>
+  <div class="nums">
+    <div><div class="lab">Collected</div><div class="val c-green" id="col">—</div></div>
+    <div><div class="lab">Payable</div><div class="val c-blue" id="pay">—</div></div>
+    <div><div class="lab">Balance</div><div class="val c-red" id="bal">—</div></div>
+    <div><div class="lab">Vacant</div><div class="val c-yellow" id="vac">—</div></div>
+  </div>
+</div>
+
+<div>
+  <div class="bar"><i id="barfill" style="width:0%"></i></div>
+  <div class="barlab"><span id="barpct">—</span><span id="occ">—</span></div>
+</div>
+
+<div class="strip" id="strip"></div>
+
+<script>
+const fmtM = n => (n/1e6).toFixed(1)+"M";
+const T = DATA.reduce((a,b)=>({u:a.u+b.units,o:a.o+b.occ,p:a.p+b.payable,c:a.c+b.crt,m:a.m+b.col}),
+  {u:0,o:0,p:0,c:0,m:0});
+const rate=(T.m+T.c)/T.p*100, bal=Math.max(0,T.p-T.m-T.c);
+const rcol = rate>=80?"#299c46":rate>=50?"#e5ac0e":"#d44a3a";
+
+document.getElementById("month").textContent = MONTH_LABEL;
+document.getElementById("col").textContent = fmtM(T.m);
+document.getElementById("pay").textContent = fmtM(T.p);
+document.getElementById("bal").textContent = fmtM(bal);
+document.getElementById("vac").textContent = (T.u-T.o)+" / "+T.u;
+document.getElementById("barfill").style.width = Math.min(rate,100)+"%";
+document.getElementById("barfill").style.background = rcol==="#d44a3a"?"#e02f44":rcol==="#e5ac0e"?"#e5ac0e":"#7eb26d";
+document.getElementById("barpct").textContent = "Collection "+rate.toFixed(0)+"% (incl. CRT)";
+document.getElementById("occ").textContent = "Occupancy "+(T.o/T.u*100).toFixed(0)+"%";
+
+/* gauge */
+(function(){
+  const r=38,cx=48,cy=48,ang=Math.PI*(1-Math.min(rate,100)/100);
+  const x2=cx+r*Math.cos(ang), y2=cy-r*Math.sin(ang);
+  document.getElementById("g").innerHTML =
+   `<svg viewBox="0 0 96 60">
+      <path d="M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}" stroke="#2c2f36" stroke-width="9" fill="none"/>
+      <path d="M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${x2} ${y2}" stroke="${rcol}" stroke-width="9" fill="none"/>
+      <text x="${cx}" y="${cy-4}" text-anchor="middle" fill="${rcol}" font-size="17" font-weight="700" font-family="Roboto">${rate.toFixed(0)}%</text>
+    </svg>`;
+})();
+
+/* per-block strip A–M + St */
+const strip=document.getElementById("strip");
+DATA.forEach(b=>{
+  const p=(b.col+b.crt)/b.payable*100;
+  const cls=p>=80?"":p>=50?" warn":" bad";
+  strip.insertAdjacentHTML("beforeend",
+    `<div class="cell${cls}" title="${b.id} ${p.toFixed(0)}%">${b.id==="Stalls"?"St":b.id}</div>`);
+});
+
+function tick(){
+  const d=new Date();
+  document.getElementById("time").textContent =
+    d.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit"})+" "+
+    d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+}
+tick(); setInterval(tick,30000);
+</script>
+</body>
+</html>
