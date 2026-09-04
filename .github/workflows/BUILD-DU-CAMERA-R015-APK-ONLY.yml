@@ -1,0 +1,323 @@
+name: Build DU Camera R015 APK ONLY
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R015-APK-ONLY.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_du_camera_r015_dfv238_master_stable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude repo
+        uses: actions/checkout@v4
+
+      - name: Replay proven V280-33.4.5.4 clean HUD source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYREPLAY'
+          from pathlib import Path
+          import base64
+          import os, re, subprocess, tempfile
+
+          recipe = Path('.github/workflows/V280-33-4-5-4-CLEAN-CINEMA-HUD.yml')
+          lines = recipe.read_text(encoding='utf-8').splitlines()
+          wanted = [
+              'Replay proven V280-31.4 FIX1 source pipeline',
+              'Apply V280-33.4.5.4 clean cinema HUD overlay',
+              'Verify V280-33.4.5.4 clean cinema HUD contract',
+          ]
+
+          def indent(s):
+              return len(s) - len(s.lstrip(' '))
+
+          steps = {}
+          i = 0
+          while i < len(lines):
+              m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[i])
+              if not m:
+                  i += 1
+                  continue
+              step_indent = len(m.group(1))
+              name = m.group(2)
+              end = len(lines)
+              for k in range(i + 1, len(lines)):
+                  mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[k])
+                  if mm and len(mm.group(1)) == step_indent:
+                      end = k
+                      break
+
+              script = None
+              for k in range(i + 1, end):
+                  if lines[k].strip() == 'run: |':
+                      run_indent = indent(lines[k])
+                      content_indent = run_indent + 2
+                      block = []
+                      for q in range(k + 1, end):
+                          ln = lines[q]
+                          if not ln.strip():
+                              block.append('')
+                              continue
+                          if indent(ln) <= run_indent:
+                              break
+                          block.append(ln[content_indent:] if len(ln) >= content_indent else '')
+                      script = '\n'.join(block) + '\n'
+                      break
+
+              steps[name] = script
+              i = end
+
+          missing = [n for n in wanted if n not in steps or not steps[n]]
+          if missing:
+              raise SystemExit('Missing V280-33 replay steps: ' + ', '.join(missing))
+
+          for name in wanted:
+              print(f'\n===== V280-69.32.33.41 BASE: {name} =====', flush=True)
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(steps[name])
+                  tmp = f.name
+              try:
+                  result = subprocess.run(['bash', tmp], cwd=str(Path.cwd()), env=os.environ.copy())
+              finally:
+                  Path(tmp).unlink(missing_ok=True)
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+
+          print('PASS: stable V280-33.4.5.4 source replayed.')
+          PYREPLAY
+
+
+      - name: Restore dfv238 master camera law and remove late HUD provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='v172-source/app/src/main/java/com/sentongoharuna/pulse'
+          MANIFEST='v172-source/app/src/main/AndroidManifest.xml'
+
+          # R011-R013 are intentionally not replayed. Disable the later clean-HUD provider
+          # so the camera is controlled by the dfv238 shell rather than a full-screen overlay.
+          python3 - <<'PYRESET'
+          from pathlib import Path
+          import re
+          manifest = Path('v172-source/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text(encoding='utf-8')
+          text = re.sub(
+              r'\s*<provider\b(?=[^>]*(?:CleanHudProvider|V28033454CleanHudProvider))[^>]*/>',
+              '', text, flags=re.S
+          )
+          manifest.write_text(text, encoding='utf-8')
+          print('PASS: late full-screen HUD provider registration removed where present.')
+          PYRESET
+
+          echo 'IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwpmcm9tIHBhdGhsaWIgaW1wb3J0IFBhdGgKaW1wb3J0IHJlCgpST09UID0gUGF0aC5jd2QoKQpTUkMgPSBST09UIC8gInYxNzItc291cmNlL2FwcC9zcmMvbWFpbi9qYXZhL2NvbS9zZW50b25nb2hhcnVuYS9wdWxzZSIKR1JBRExFID0gUk9PVCAvICJ2MTcyLXNvdXJjZS9hcHAvYnVpbGQuZ3JhZGxlLmt0cyIKQ0FNRVJBID0gU1JDIC8gIkRldmVsb3BVZ2FuZGFDYW1lcmFBY3Rpdml0eS5rdCIKT1BFUkFUT1IgPSBTUkMgLyAiRGV2ZWxvcFVnYW5kYU9wZXJhdG9yRXhwZXJpZW5jZS5rdCIKTElWRV9HUkFERSA9IFNSQyAvICJEZXZlbG9wVWdhbmRhTGl2ZUdyYWRlUGFuZWwua3QiCkZJRUxEID0gU1JDIC8gIkRldmVsb3BVZ2FuZGFGaWVsZEludGVsbGlnZW5jZVBhbmVsLmt0IgpTVE9SWSA9IFNSQyAvICJEZXZlbG9wVWdhbmRhU3RvcnlQYWNrYWdlci5rdCIKSEVMUEVSID0gU1JDIC8gIkRldmVsb3BVZ2FuZGFEZnYyMzhDYW1lcmFTaGVsbC5rdCIKUkVBRE1FID0gUk9PVCAvICJSRUFETUUtREZWMjM4LnR4dCIKCnJlcXVpcmVkID0gWwogICAgQ0FNRVJBLAogICAgT1BFUkFUT1IsCiAgICBMSVZFX0dSQURFLAogICAgRklFTEQsCiAgICBTVE9SWSwKICAgIFNSQyAvICJEZXZlbG9wVWdhbmRhQ29sb3JFbmdpbmUua3QiLAogICAgU1JDIC8gIkRldmVsb3BVZ2FuZGFDb2xvclR1bmVyLmt0IiwKICAgIFNSQyAvICJEZXZlbG9wVWdhbmRhRXZlcnlkYXlDb2xvck1peGVyLmt0IiwKICAgIFNSQyAvICJEZXZlbG9wVWdhbmRhTmF2eVNoZWV0Lmt0IiwKICAgIFNSQyAvICJEZXZlbG9wVWdhbmRhQWRhcHRpdmVGb3JtYXRVaS5rdCIsCiAgICBHUkFETEUsCl0KZm9yIHBhdGggaW4gcmVxdWlyZWQ6CiAgICBpZiBub3QgcGF0aC5leGlzdHMoKToKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KGYiZGZ2MjM4IHJlcXVpcmVkIFYyMzggYmFzZSBmaWxlIG1pc3Npbmc6IHtwYXRofSIpCgpkZWYgcmVwbGFjZV9vbmNlKHRleHQ6IHN0ciwgb2xkOiBzdHIsIG5ldzogc3RyLCBsYWJlbDogc3RyKSAtPiBzdHI6CiAgICBpZiBuZXcgaW4gdGV4dDoKICAgICAgICByZXR1cm4gdGV4dAogICAgaWYgb2xkIG5vdCBpbiB0ZXh0OgogICAgICAgIHJhaXNlIFN5c3RlbUV4aXQoZiJkZnYyMzggcGF0Y2ggY291bGQgbm90IGZpbmQge2xhYmVsfSIpCiAgICByZXR1cm4gdGV4dC5yZXBsYWNlKG9sZCwgbmV3LCAxKQoKZ3JhZGxlX25vdyA9IEdSQURMRS5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04IikKIyBSRVNFVCBNQVNURVI6IGFwcGx5IHRoZSBwcm92ZW4gZGZ2MjM4IFVJIGxhdyB0byB0aGUgYnVpbGRhYmxlIHNvdXJjZSB3aXRob3V0CiMgcmVwbGFjaW5nIENhbWVyYVggcmVjb3JkaW5nL291dHB1dCBjb2RlLgoKSEVMUEVSX1NPVVJDRSA9IHInJydwYWNrYWdlIGNvbS5zZW50b25nb2hhcnVuYS5wdWxzZQoKaW1wb3J0IGFuZHJvaWQuZ3JhcGhpY3MuQ29sb3IKaW1wb3J0IGFuZHJvaWQuZ3JhcGhpY3MuVHlwZWZhY2UKaW1wb3J0IGFuZHJvaWQuZ3JhcGhpY3MuZHJhd2FibGUuR3JhZGllbnREcmF3YWJsZQppbXBvcnQgYW5kcm9pZC5vcy5IYW5kbGVyCmltcG9ydCBhbmRyb2lkLm9zLkxvb3BlcgppbXBvcnQgYW5kcm9pZC52aWV3LkdyYXZpdHkKaW1wb3J0IGFuZHJvaWQudmlldy5WaWV3CmltcG9ydCBhbmRyb2lkLnZpZXcuVmlld0dyb3VwCmltcG9ydCBhbmRyb2lkLndpZGdldC5CdXR0b24KaW1wb3J0IGFuZHJvaWQud2lkZ2V0LkZyYW1lTGF5b3V0CmltcG9ydCBhbmRyb2lkLndpZGdldC5MaW5lYXJMYXlvdXQKaW1wb3J0IGFuZHJvaWQud2lkZ2V0LlNjcm9sbFZpZXcKaW1wb3J0IGFuZHJvaWQud2lkZ2V0LlRleHRWaWV3CmltcG9ydCBhbmRyb2lkeC5hcHBjb21wYXQuYXBwLkFwcENvbXBhdEFjdGl2aXR5CgovKioKICogZGZ2MjM4IGNhbWVyYSBzaGVsbC4KICoKICogRGVzaWduIGxhdzoKICogMS4gTFVUUyBpcyBwZXJtYW5lbnQ6IHRoZSBWMjM1IExVVCBjb250cm9sIGlzIHRoZSB2aXN1YWwgcmVmZXJlbmNlLgogKiAyLiBBU1BFQ1QgYW5kIExVVFMgYXJlIHRoZSBvbmx5IHR3byBwZXJzaXN0ZW50IHRvcCBjYW1lcmEgY29udHJvbHMuCiAqIDMuIFYyMzggY2FtZXJhIGZ1bmN0aW9ucyBhcmUgbm90IGRlbGV0ZWQ6IG5vbi1zaG9vdGluZyBjb250cm9scyBtb3ZlIGludG8KICogICAgYSByaWdodC1zaWRlIHNldHRpbmdzIGRyYXdlciBhbmQga2VlcCB0aGVpciBvcmlnaW5hbCBjbGljayBsaXN0ZW5lcnMuCiAqIDQuIFRoZSBWMjM4IExFTlMgLyBSRUNPUkQgLyBMSUdIVCBhY3Rpb24gcm93IHN0YXlzIGF2YWlsYWJsZSBhdCB0aGUgYm90dG9tLgogKiA1LiBWMjM1IGNvbG9yIGFsZ29yaXRobXMgYW5kIHRoZSBDYW1lcmFYIHJlY29yZGluZyBwYXRoIGFyZSBub3QgY2hhbmdlZC4KICovCm9iamVjdCBEZXZlbG9wVWdhbmRhRGZ2MjM4Q2FtZXJhU2hlbGwgewoKICAgIHByaXZhdGUgY29uc3QgdmFsIFRBRyA9ICJkZXZlbG9wX3VnYW5kYV9kZnYyMzhfY2FtZXJhX3NoZWxsIgogICAgcHJpdmF0ZSBjb25zdCB2YWwgTFVUX1RBRyA9ICJkZXZlbG9wX3VnYW5kYV92MjM1X2xpdmVfZ3JhZGVfcGFuZWwiCiAgICBwcml2YXRlIGNvbnN0IHZhbCBBU1BFQ1RfVEFHID0gImRldmVsb3BfdWdhbmRhX3YyMzZfZmllbGRfaW50ZWxsaWdlbmNlIgogICAgcHJpdmF0ZSBjb25zdCB2YWwgVE9PTFNfVEFHID0gImRldmVsb3BfdWdhbmRhX3YyMzNfdG9vbHNfY2hpcCIKICAgIHByaXZhdGUgY29uc3QgdmFsIFJFQURZX1RBRyA9ICJkZnYyMzhfc2hvdF9yZWFkeV9jaGlwIgoKICAgIHByaXZhdGUgdmFsIHNldHRpbmdzUm93VGFncyA9IGxpc3RPZigKICAgICAgICAidjIzN19jYW1lcmFfbW9kZV9yb3ciLAogICAgICAgICJ2MjM3X2NhbWVyYV9pZGVudGl0eV9yb3ciLAogICAgICAgICJ2MjM3X2NhbWVyYV90b29sc19yb3ciLAogICAgICAgICJ2MjM3X2NhbWVyYV9hZHZhbmNlZF9yb3ciLAogICAgICAgICJ2MjM3X2NhbWVyYV9kaXNwbGF5X3JvdyIsCiAgICAgICAgInYyMzdfY2FtZXJhX291dHB1dF9yb3ciLAogICAgICAgICJ2MjM3X2NhbWVyYV9kaXJlY3Rvcl9yb3ciLAogICAgICAgICJ2MjM3X2NhbWVyYV96b29tX3JvdyIsCiAgICAgICAgInYyMzdfY2FtZXJhX2V4cG9zdXJlX3JvdyIsCiAgICAgICAgInYyMzdfY2FtZXJhX3NldHRpbmdzX3N1bW1hcnkiLAogICAgICAgIFRPT0xTX1RBRywKICAgICAgICBSRUFEWV9UQUcKICAgICkKCiAgICBmdW4gYXR0YWNoKAogICAgICAgIGFjdGl2aXR5OiBBcHBDb21wYXRBY3Rpdml0eSwKICAgICAgICByb290OiBGcmFtZUxheW91dAogICAgKSB7CiAgICAgICAgaWYgKHJvb3QuZmluZFZpZXdXaXRoVGFnPFZpZXc+KFRBRykgIT0gbnVsbCkgcmV0dXJuCiAgICAgICAgQ29udHJvbGxlcihhY3Rpdml0eSwgcm9vdCkuYXR0YWNoKCkKICAgIH0KCiAgICBwcml2YXRlIGNsYXNzIENvbnRyb2xsZXIoCiAgICAgICAgcHJpdmF0ZSB2YWwgYWN0aXZpdHk6IEFwcENvbXBhdEFjdGl2aXR5LAogICAgICAgIHByaXZhdGUgdmFsIHJvb3Q6IEZyYW1lTGF5b3V0CiAgICApIHsKICAgICAgICBwcml2YXRlIHZhbCBoYW5kbGVyID0gSGFuZGxlcihMb29wZXIuZ2V0TWFpbkxvb3BlcigpKQogICAgICAgIHByaXZhdGUgbGF0ZWluaXQgdmFyIG1hcmtlcjogVmlldwogICAgICAgIHByaXZhdGUgbGF0ZWluaXQgdmFyIHNjcmltOiBWaWV3CiAgICAgICAgcHJpdmF0ZSBsYXRlaW5pdCB2YXIgZHJhd2VyOiBMaW5lYXJMYXlvdXQKICAgICAgICBwcml2YXRlIGxhdGVpbml0IHZhciBib2R5OiBMaW5lYXJMYXlvdXQKICAgICAgICBwcml2YXRlIGxhdGVpbml0IHZhciBzZXR0aW5nc1RhYjogQnV0dG9uCiAgICAgICAgcHJpdmF0ZSB2YXIgZHJhd2VyT3BlbiA9IGZhbHNlCiAgICAgICAgcHJpdmF0ZSB2YWwgbW92ZWRWaWV3cyA9IGxpbmtlZFNldE9mPFZpZXc+KCkKCiAgICAgICAgcHJpdmF0ZSB2YWwgdGljayA9IG9iamVjdCA6IFJ1bm5hYmxlIHsKICAgICAgICAgICAgb3ZlcnJpZGUgZnVuIHJ1bigpIHsKICAgICAgICAgICAgICAgIGlmIChhY3Rpdml0eS5pc0ZpbmlzaGluZyB8fCBhY3Rpdml0eS5pc0Rlc3Ryb3llZCkgcmV0dXJuCiAgICAgICAgICAgICAgICBwcm90ZWN0VG9wQ29udHJvbHMoKQogICAgICAgICAgICAgICAgbW92ZVNldHRpbmdzSW50b0RyYXdlcigpCiAgICAgICAgICAgICAgICBoYW5kbGVyLnBvc3REZWxheWVkKHRoaXMsIDE4MEwpCiAgICAgICAgICAgIH0KICAgICAgICB9CgogICAgICAgIGZ1biBhdHRhY2goKSB7CiAgICAgICAgICAgIG1hcmtlciA9IFZpZXcoYWN0aXZpdHkpLmFwcGx5IHsKICAgICAgICAgICAgICAgIHRhZyA9IFRBRwogICAgICAgICAgICAgICAgdmlzaWJpbGl0eSA9IFZpZXcuR09ORQogICAgICAgICAgICB9CiAgICAgICAgICAgIHJvb3QuYWRkVmlldyhtYXJrZXIsIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcygxLCAxKSkKCiAgICAgICAgICAgIGJ1aWxkU2NyaW0oKQogICAgICAgICAgICBidWlsZERyYXdlcigpCiAgICAgICAgICAgIGJ1aWxkU2V0dGluZ3NUYWIoKQoKICAgICAgICAgICAgbWFya2VyLmFkZE9uQXR0YWNoU3RhdGVDaGFuZ2VMaXN0ZW5lcigKICAgICAgICAgICAgICAgIG9iamVjdCA6IFZpZXcuT25BdHRhY2hTdGF0ZUNoYW5nZUxpc3RlbmVyIHsKICAgICAgICAgICAgICAgICAgICBvdmVycmlkZSBmdW4gb25WaWV3QXR0YWNoZWRUb1dpbmRvdyh2OiBWaWV3KSA9IFVuaXQKICAgICAgICAgICAgICAgICAgICBvdmVycmlkZSBmdW4gb25WaWV3RGV0YWNoZWRGcm9tV2luZG93KHY6IFZpZXcpIHsKICAgICAgICAgICAgICAgICAgICAgICAgaGFuZGxlci5yZW1vdmVDYWxsYmFja3NBbmRNZXNzYWdlcyhudWxsKQogICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgKQoKICAgICAgICAgICAgcm9vdC5wb3N0IHsKICAgICAgICAgICAgICAgIHByb3RlY3RUb3BDb250cm9scygpCiAgICAgICAgICAgICAgICBtb3ZlU2V0dGluZ3NJbnRvRHJhd2VyKCkKICAgICAgICAgICAgfQogICAgICAgICAgICBoYW5kbGVyLnBvc3QodGljaykKICAgICAgICB9CgogICAgICAgIHByaXZhdGUgZnVuIGJ1aWxkU2NyaW0oKSB7CiAgICAgICAgICAgIHNjcmltID0gVmlldyhhY3Rpdml0eSkuYXBwbHkgewogICAgICAgICAgICAgICAgc2V0QmFja2dyb3VuZENvbG9yKDB4NjYwMDAwMDApCiAgICAgICAgICAgICAgICB2aXNpYmlsaXR5ID0gVmlldy5HT05FCiAgICAgICAgICAgICAgICBzZXRPbkNsaWNrTGlzdGVuZXIgeyBzZXREcmF3ZXIoZmFsc2UpIH0KICAgICAgICAgICAgfQogICAgICAgICAgICByb290LmFkZFZpZXcoCiAgICAgICAgICAgICAgICBzY3JpbSwKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcygKICAgICAgICAgICAgICAgICAgICBWaWV3R3JvdXAuTGF5b3V0UGFyYW1zLk1BVENIX1BBUkVOVCwKICAgICAgICAgICAgICAgICAgICBWaWV3R3JvdXAuTGF5b3V0UGFyYW1zLk1BVENIX1BBUkVOVAogICAgICAgICAgICAgICAgKQogICAgICAgICAgICApCiAgICAgICAgfQoKICAgICAgICBwcml2YXRlIGZ1biBidWlsZERyYXdlcigpIHsKICAgICAgICAgICAgZHJhd2VyID0gTGluZWFyTGF5b3V0KGFjdGl2aXR5KS5hcHBseSB7CiAgICAgICAgICAgICAgICBvcmllbnRhdGlvbiA9IExpbmVhckxheW91dC5WRVJUSUNBTAogICAgICAgICAgICAgICAgc2V0UGFkZGluZyhkcCgxMCksIGRwKDEyKSwgZHAoMTApLCBkcCgxMCkpCiAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kID0gcm91bmRlZCgKICAgICAgICAgICAgICAgICAgICAweEZBMDMxODI5LnRvSW50KCksCiAgICAgICAgICAgICAgICAgICAgMHhGRjczQjdEOS50b0ludCgpLAogICAgICAgICAgICAgICAgICAgIDE4CiAgICAgICAgICAgICAgICApCiAgICAgICAgICAgICAgICB2aXNpYmlsaXR5ID0gVmlldy5HT05FCiAgICAgICAgICAgICAgICBlbGV2YXRpb24gPSBkcCgxNikudG9GbG9hdCgpCiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIHZhbCBoZWFkID0gTGluZWFyTGF5b3V0KGFjdGl2aXR5KS5hcHBseSB7CiAgICAgICAgICAgICAgICBvcmllbnRhdGlvbiA9IExpbmVhckxheW91dC5IT1JJWk9OVEFMCiAgICAgICAgICAgICAgICBncmF2aXR5ID0gR3Jhdml0eS5DRU5URVJfVkVSVElDQUwKICAgICAgICAgICAgfQoKICAgICAgICAgICAgaGVhZC5hZGRWaWV3KAogICAgICAgICAgICAgICAgVGV4dFZpZXcoYWN0aXZpdHkpLmFwcGx5IHsKICAgICAgICAgICAgICAgICAgICB0ZXh0ID0gImRmdjIzOCDigKIgQ0FNRVJBIFNFVFRJTkdTIgogICAgICAgICAgICAgICAgICAgIHRleHRTaXplID0gMTBmCiAgICAgICAgICAgICAgICAgICAgc2V0VGV4dENvbG9yKENvbG9yLldISVRFKQogICAgICAgICAgICAgICAgICAgIHR5cGVmYWNlID0gVHlwZWZhY2UuREVGQVVMVF9CT0xECiAgICAgICAgICAgICAgICB9LAogICAgICAgICAgICAgICAgTGluZWFyTGF5b3V0LkxheW91dFBhcmFtcygKICAgICAgICAgICAgICAgICAgICAwLAogICAgICAgICAgICAgICAgICAgIFZpZXdHcm91cC5MYXlvdXRQYXJhbXMuV1JBUF9DT05URU5ULAogICAgICAgICAgICAgICAgICAgIDFmCiAgICAgICAgICAgICAgICApCiAgICAgICAgICAgICkKCiAgICAgICAgICAgIGhlYWQuYWRkVmlldygKICAgICAgICAgICAgICAgIGx1dFN0eWxlQnV0dG9uKCJDTE9TRSDDlyIpLmFwcGx5IHsKICAgICAgICAgICAgICAgICAgICBzZXRPbkNsaWNrTGlzdGVuZXIgeyBzZXREcmF3ZXIoZmFsc2UpIH0KICAgICAgICAgICAgICAgIH0sCiAgICAgICAgICAgICAgICBMaW5lYXJMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDc4KSwgZHAoNDIpKQogICAgICAgICAgICApCiAgICAgICAgICAgIGRyYXdlci5hZGRWaWV3KGhlYWQpCgogICAgICAgICAgICBkcmF3ZXIuYWRkVmlldygKICAgICAgICAgICAgICAgIFRleHRWaWV3KGFjdGl2aXR5KS5hcHBseSB7CiAgICAgICAgICAgICAgICAgICAgdGV4dCA9CiAgICAgICAgICAgICAgICAgICAgICAgICJUaGUgc2hvb3RpbmcgdmlldyBzdGF5cyBjbGVhbjogTFVUUyArIEFTUEVDVCBvbiB0b3AuICIgKwogICAgICAgICAgICAgICAgICAgICAgICAiVGhlIG9yaWdpbmFsIFYyMzggY29udHJvbHMgYmVsb3cga2VlcCB0aGVpciByZWFsIGZ1bmN0aW9ucyBoZXJlLiIKICAgICAgICAgICAgICAgICAgICB0ZXh0U2l6ZSA9IDcuNmYKICAgICAgICAgICAgICAgICAgICBzZXRUZXh0Q29sb3IoMHhGRkI5QzlENC50b0ludCgpKQogICAgICAgICAgICAgICAgICAgIHNldFBhZGRpbmcoMCwgZHAoNiksIDAsIGRwKDgpKQogICAgICAgICAgICAgICAgfQogICAgICAgICAgICApCgogICAgICAgICAgICBib2R5ID0gTGluZWFyTGF5b3V0KGFjdGl2aXR5KS5hcHBseSB7CiAgICAgICAgICAgICAgICBvcmllbnRhdGlvbiA9IExpbmVhckxheW91dC5WRVJUSUNBTAogICAgICAgICAgICB9CgogICAgICAgICAgICB2YWwgc2Nyb2xsID0gU2Nyb2xsVmlldyhhY3Rpdml0eSkuYXBwbHkgewogICAgICAgICAgICAgICAgaXNGaWxsVmlld3BvcnQgPSBmYWxzZQogICAgICAgICAgICAgICAgYWRkVmlldygKICAgICAgICAgICAgICAgICAgICBib2R5LAogICAgICAgICAgICAgICAgICAgIFZpZXdHcm91cC5MYXlvdXRQYXJhbXMoCiAgICAgICAgICAgICAgICAgICAgICAgIFZpZXdHcm91cC5MYXlvdXRQYXJhbXMuTUFUQ0hfUEFSRU5ULAogICAgICAgICAgICAgICAgICAgICAgICBWaWV3R3JvdXAuTGF5b3V0UGFyYW1zLldSQVBfQ09OVEVOVAogICAgICAgICAgICAgICAgICAgICkKICAgICAgICAgICAgICAgICkKICAgICAgICAgICAgfQoKICAgICAgICAgICAgZHJhd2VyLmFkZFZpZXcoCiAgICAgICAgICAgICAgICBzY3JvbGwsCiAgICAgICAgICAgICAgICBMaW5lYXJMYXlvdXQuTGF5b3V0UGFyYW1zKAogICAgICAgICAgICAgICAgICAgIFZpZXdHcm91cC5MYXlvdXRQYXJhbXMuTUFUQ0hfUEFSRU5ULAogICAgICAgICAgICAgICAgICAgIDAsCiAgICAgICAgICAgICAgICAgICAgMWYKICAgICAgICAgICAgICAgICkKICAgICAgICAgICAgKQoKICAgICAgICAgICAgZHJhd2VyLmFkZFZpZXcoCiAgICAgICAgICAgICAgICBUZXh0VmlldyhhY3Rpdml0eSkuYXBwbHkgewogICAgICAgICAgICAgICAgICAgIHRleHQgPQogICAgICAgICAgICAgICAgICAgICAgICAiTFVUUyByZW1haW5zIHRoZSBtYXN0ZXIgdmlzdWFsIGNvbnRyb2wuICIgKwogICAgICAgICAgICAgICAgICAgICAgICAiQVNQRUNUIGNvbnRyb2xzIHRoZSBkZWxpdmVyeSBmcmFtZSBhbmQgc2FmZSBndWlkZXMuICIgKwogICAgICAgICAgICAgICAgICAgICAgICAiTEVOUyAvIFJFQ09SRCAvIExJR0hUIHJlbWFpbiBvbiB0aGUgc2hvb3Rpbmcgc2NyZWVuLiIKICAgICAgICAgICAgICAgICAgICB0ZXh0U2l6ZSA9IDcuMmYKICAgICAgICAgICAgICAgICAgICBzZXRUZXh0Q29sb3IoMHhGRjkxQjZBMC50b0ludCgpKQogICAgICAgICAgICAgICAgICAgIHR5cGVmYWNlID0gVHlwZWZhY2UuREVGQVVMVF9CT0xECiAgICAgICAgICAgICAgICAgICAgc2V0UGFkZGluZygwLCBkcCg3KSwgMCwgMCkKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgKQoKICAgICAgICAgICAgdmFsIHdpZHRoID0KICAgICAgICAgICAgICAgIChhY3Rpdml0eS5yZXNvdXJjZXMuZGlzcGxheU1ldHJpY3Mud2lkdGhQaXhlbHMgKiAwLjgyZikKICAgICAgICAgICAgICAgICAgICAudG9JbnQoKQogICAgICAgICAgICAgICAgICAgIC5jb2VyY2VBdE1vc3QoZHAoMzkwKSkKCiAgICAgICAgICAgIHJvb3QuYWRkVmlldygKICAgICAgICAgICAgICAgIGRyYXdlciwKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcygKICAgICAgICAgICAgICAgICAgICB3aWR0aCwKICAgICAgICAgICAgICAgICAgICBWaWV3R3JvdXAuTGF5b3V0UGFyYW1zLk1BVENIX1BBUkVOVAogICAgICAgICAgICAgICAgKS5hcHBseSB7CiAgICAgICAgICAgICAgICAgICAgZ3Jhdml0eSA9IEdyYXZpdHkuRU5ECiAgICAgICAgICAgICAgICAgICAgdG9wTWFyZ2luID0gZHAoNCkKICAgICAgICAgICAgICAgICAgICBib3R0b21NYXJnaW4gPSBkcCg0KQogICAgICAgICAgICAgICAgICAgIHJpZ2h0TWFyZ2luID0gZHAoNCkKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgKQogICAgICAgIH0KCiAgICAgICAgcHJpdmF0ZSBmdW4gYnVpbGRTZXR0aW5nc1RhYigpIHsKICAgICAgICAgICAgc2V0dGluZ3NUYWIgPSBsdXRTdHlsZUJ1dHRvbigiU0VUVElOR1NcbuKWuCIpLmFwcGx5IHsKICAgICAgICAgICAgICAgIHNldE9uQ2xpY2tMaXN0ZW5lciB7IHNldERyYXdlcighZHJhd2VyT3BlbikgfQogICAgICAgICAgICB9CgogICAgICAgICAgICByb290LmFkZFZpZXcoCiAgICAgICAgICAgICAgICBzZXR0aW5nc1RhYiwKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcygKICAgICAgICAgICAgICAgICAgICBkcCg5MiksCiAgICAgICAgICAgICAgICAgICAgZHAoNTApCiAgICAgICAgICAgICAgICApLmFwcGx5IHsKICAgICAgICAgICAgICAgICAgICBncmF2aXR5ID0gR3Jhdml0eS5FTkQgb3IgR3Jhdml0eS5DRU5URVJfVkVSVElDQUwKICAgICAgICAgICAgICAgICAgICByaWdodE1hcmdpbiA9IGRwKDcpCiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICkKICAgICAgICB9CgogICAgICAgIHByaXZhdGUgZnVuIHByb3RlY3RUb3BDb250cm9scygpIHsKICAgICAgICAgICAgdmFsIGx1dCA9IHJvb3QuZmluZFZpZXdXaXRoVGFnPFZpZXc+KExVVF9UQUcpCiAgICAgICAgICAgIHZhbCBhc3BlY3QgPSByb290LmZpbmRWaWV3V2l0aFRhZzxWaWV3PihBU1BFQ1RfVEFHKQoKICAgICAgICAgICAgbm9ybWFsaXplVG9wTGFiZWwobHV0LCB0cnVlKQogICAgICAgICAgICBub3JtYWxpemVUb3BMYWJlbChhc3BlY3QsIGZhbHNlKQogICAgICAgICAgICBwbGFjZVRvcENoaXAobHV0LCB0cnVlLCAxMDQsIDUyKQogICAgICAgICAgICBwbGFjZVRvcENoaXAoYXNwZWN0LCBmYWxzZSwgMTIyLCA1MikKCiAgICAgICAgICAgIC8vIFYyMzggQ0xFQU4gVklFVyBhdXRvLWhpZGUgbXVzdCBuZXZlciBtYWtlIHRoZXNlIHR3byBkaXNhcHBlYXIuCiAgICAgICAgICAgIGx1dD8udmlzaWJpbGl0eSA9IFZpZXcuVklTSUJMRQogICAgICAgICAgICBhc3BlY3Q/LnZpc2liaWxpdHkgPSBWaWV3LlZJU0lCTEUKICAgICAgICAgICAgbHV0Py5icmluZ1RvRnJvbnQoKQogICAgICAgICAgICBhc3BlY3Q/LmJyaW5nVG9Gcm9udCgpCgogICAgICAgICAgICAvLyBUaGUgb3JpZ2luYWwgYWN0aW9uIHJvdyBzdGF5cyBvbiB0aGUgY2FtZXJhIGZvciBhY3R1YWwgc2hvb3RpbmcuCiAgICAgICAgICAgIHJvb3QuZmluZFZpZXdXaXRoVGFnPFZpZXc+KCJ2MjM3X2NhbWVyYV9hY3Rpb25fcm93IikKICAgICAgICAgICAgICAgID8udmlzaWJpbGl0eSA9IFZpZXcuVklTSUJMRQoKICAgICAgICAgICAgLy8gTE9PSyBpbiB0aGUgb2xkIGZpdmUtYnV0dG9uIHJvdyBkdXBsaWNhdGVzIHRoZSBwZXJtYW5lbnQgTFVUUyBjb250cm9sLgogICAgICAgICAgICByb290LmZpbmRWaWV3V2l0aFRhZzxWaWV3PigidjIzN19sb29rX2J1dHRvbiIpCiAgICAgICAgICAgICAgICA/LnZpc2liaWxpdHkgPSBWaWV3LkdPTkUKCiAgICAgICAgICAgIHNldHRpbmdzVGFiLnZpc2liaWxpdHkgPQogICAgICAgICAgICAgICAgaWYgKGRyYXdlck9wZW4pIFZpZXcuR09ORSBlbHNlIFZpZXcuVklTSUJMRQogICAgICAgIH0KCiAgICAgICAgcHJpdmF0ZSBmdW4gbm9ybWFsaXplVG9wTGFiZWwodmlldzogVmlldz8sIGlzTHV0OiBCb29sZWFuKSB7CiAgICAgICAgICAgIHZhbCB0ZXh0VmlldyA9IGZpbmRGaXJzdFRleHRWaWV3KHZpZXcpID86IHJldHVybgogICAgICAgICAgICB2YWwgY3VycmVudCA9IHRleHRWaWV3LnRleHQ/LnRvU3RyaW5nKCkub3JFbXB0eSgpCgogICAgICAgICAgICBpZiAoaXNMdXQpIHsKICAgICAgICAgICAgICAgIHdoZW4gewogICAgICAgICAgICAgICAgICAgIGN1cnJlbnQuc3RhcnRzV2l0aCgiR1JBREUiKSAtPgogICAgICAgICAgICAgICAgICAgICAgICB0ZXh0Vmlldy50ZXh0ID0gIkxVVFMiICsgY3VycmVudC5yZW1vdmVQcmVmaXgoIkdSQURFIikKICAgICAgICAgICAgICAgICAgICBjdXJyZW50LmlzQmxhbmsoKSAtPgogICAgICAgICAgICAgICAgICAgICAgICB0ZXh0Vmlldy50ZXh0ID0gIkxVVFMg4oCiIFYyMzVcbk1JWCDilrgiCiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICByZXR1cm4KICAgICAgICAgICAgfQoKICAgICAgICAgICAgaWYgKCFjdXJyZW50LnN0YXJ0c1dpdGgoIkFTUEVDVCIpKSB7CiAgICAgICAgICAgICAgICB2YWwgZmlyc3RMaW5lID0gY3VycmVudC5saW5lU2VxdWVuY2UoKS5maXJzdE9yTnVsbCgpLm9yRW1wdHkoKQogICAgICAgICAgICAgICAgdmFsIHJhdGlvID0KICAgICAgICAgICAgICAgICAgICBmaXJzdExpbmUKICAgICAgICAgICAgICAgICAgICAgICAgLnN1YnN0cmluZ0JlZm9yZSgi4oCiIikKICAgICAgICAgICAgICAgICAgICAgICAgLnRyaW0oKQogICAgICAgICAgICAgICAgICAgICAgICAudGFrZUlmIHsgaXQubWF0Y2hlcyhSZWdleCgiIiJcZCsoPzpcLlxkKyk/OlxkK3xEVUFMIiIiKSkgfQogICAgICAgICAgICAgICAgICAgICAgICA/OiAiRk9STUFUIgogICAgICAgICAgICAgICAgdGV4dFZpZXcudGV4dCA9ICJBU1BFQ1Qg4oCiICRyYXRpb1xuRk9STUFUIOKWuCIKICAgICAgICAgICAgfQogICAgICAgIH0KCiAgICAgICAgcHJpdmF0ZSBmdW4gZmluZEZpcnN0VGV4dFZpZXcodmlldzogVmlldz8pOiBUZXh0Vmlldz8gewogICAgICAgICAgICBpZiAodmlldyA9PSBudWxsKSByZXR1cm4gbnVsbAogICAgICAgICAgICBpZiAodmlldyBpcyBUZXh0VmlldykgcmV0dXJuIHZpZXcKICAgICAgICAgICAgaWYgKHZpZXcgaXMgVmlld0dyb3VwKSB7CiAgICAgICAgICAgICAgICBmb3IgKGkgaW4gMCB1bnRpbCB2aWV3LmNoaWxkQ291bnQpIHsKICAgICAgICAgICAgICAgICAgICB2YWwgZm91bmQgPSBmaW5kRmlyc3RUZXh0Vmlldyh2aWV3LmdldENoaWxkQXQoaSkpCiAgICAgICAgICAgICAgICAgICAgaWYgKGZvdW5kICE9IG51bGwpIHJldHVybiBmb3VuZAogICAgICAgICAgICAgICAgfQogICAgICAgICAgICB9CiAgICAgICAgICAgIHJldHVybiBudWxsCiAgICAgICAgfQoKICAgICAgICBwcml2YXRlIGZ1biBwbGFjZVRvcENoaXAoCiAgICAgICAgICAgIHZpZXc6IFZpZXc/LAogICAgICAgICAgICBzdGFydDogQm9vbGVhbiwKICAgICAgICAgICAgd2lkdGhEcDogSW50LAogICAgICAgICAgICBoZWlnaHREcDogSW50CiAgICAgICAgKSB7CiAgICAgICAgICAgIGlmICh2aWV3ID09IG51bGwpIHJldHVybgoKICAgICAgICAgICAgaWYgKHZpZXcucGFyZW50ICE9PSByb290KSB7CiAgICAgICAgICAgICAgICAodmlldy5wYXJlbnQgYXM/IFZpZXdHcm91cCk/LnJlbW92ZVZpZXcodmlldykKICAgICAgICAgICAgICAgIHJvb3QuYWRkVmlldygKICAgICAgICAgICAgICAgICAgICB2aWV3LAogICAgICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyhkcCh3aWR0aERwKSwgZHAoaGVpZ2h0RHApKQogICAgICAgICAgICAgICAgKQogICAgICAgICAgICB9CgogICAgICAgICAgICB2YWwgbHAgPQogICAgICAgICAgICAgICAgKHZpZXcubGF5b3V0UGFyYW1zIGFzPyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMpCiAgICAgICAgICAgICAgICAgICAgPzogRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKHdpZHRoRHApLCBkcChoZWlnaHREcCkpCgogICAgICAgICAgICBscC53aWR0aCA9IGRwKHdpZHRoRHApCiAgICAgICAgICAgIGxwLmhlaWdodCA9IGRwKGhlaWdodERwKQogICAgICAgICAgICBscC5ncmF2aXR5ID0KICAgICAgICAgICAgICAgIEdyYXZpdHkuVE9QIG9yCiAgICAgICAgICAgICAgICAgICAgKGlmIChzdGFydCkgR3Jhdml0eS5TVEFSVCBlbHNlIEdyYXZpdHkuRU5EKQogICAgICAgICAgICBscC50b3BNYXJnaW4gPSBkcCgxMCkKICAgICAgICAgICAgbHAubGVmdE1hcmdpbiA9IGlmIChzdGFydCkgZHAoOCkgZWxzZSAwCiAgICAgICAgICAgIGxwLnJpZ2h0TWFyZ2luID0gaWYgKCFzdGFydCkgZHAoOCkgZWxzZSAwCiAgICAgICAgICAgIGxwLmJvdHRvbU1hcmdpbiA9IDAKICAgICAgICAgICAgdmlldy5sYXlvdXRQYXJhbXMgPSBscAoKICAgICAgICAgICAgaWYgKHZpZXcgaXMgQnV0dG9uKSB7CiAgICAgICAgICAgICAgICB2aWV3LnRleHRTaXplID0gOC4yZgogICAgICAgICAgICAgICAgdmlldy5pc0FsbENhcHMgPSBmYWxzZQogICAgICAgICAgICAgICAgdmlldy50eXBlZmFjZSA9IFR5cGVmYWNlLkRFRkFVTFRfQk9MRAogICAgICAgICAgICAgICAgdmlldy5zZXRUZXh0Q29sb3IoQ29sb3IuV0hJVEUpCiAgICAgICAgICAgICAgICB2aWV3LnNldFBhZGRpbmcoZHAoNyksIDAsIGRwKDcpLCAwKQogICAgICAgICAgICAgICAgdmlldy5lbGV2YXRpb24gPSBkcCg3KS50b0Zsb2F0KCkKICAgICAgICAgICAgfQogICAgICAgIH0KCiAgICAgICAgcHJpdmF0ZSBmdW4gbW92ZVNldHRpbmdzSW50b0RyYXdlcigpIHsKICAgICAgICAgICAgaWYgKCF0aGlzOjpib2R5LmlzSW5pdGlhbGl6ZWQpIHJldHVybgoKICAgICAgICAgICAgc2V0dGluZ3NSb3dUYWdzLmZvckVhY2ggeyB0YWcgLT4KICAgICAgICAgICAgICAgIHZhbCB2aWV3ID0gcm9vdC5maW5kVmlld1dpdGhUYWc8Vmlldz4odGFnKSA/OiByZXR1cm5AZm9yRWFjaAogICAgICAgICAgICAgICAgaWYgKHZpZXcgPT09IGRyYXdlciB8fCB2aWV3ID09PSBzZXR0aW5nc1RhYikgcmV0dXJuQGZvckVhY2gKICAgICAgICAgICAgICAgIGlmICh2aWV3LnBhcmVudCA9PT0gYm9keSkgewogICAgICAgICAgICAgICAgICAgIG1vdmVkVmlld3MuYWRkKHZpZXcpCiAgICAgICAgICAgICAgICAgICAgcmV0dXJuQGZvckVhY2gKICAgICAgICAgICAgICAgIH0KCiAgICAgICAgICAgICAgICB2YWwgcGFyZW50ID0gdmlldy5wYXJlbnQgYXM/IFZpZXdHcm91cCA/OiByZXR1cm5AZm9yRWFjaAogICAgICAgICAgICAgICAgcGFyZW50LnJlbW92ZVZpZXcodmlldykKCiAgICAgICAgICAgICAgICBib2R5LmFkZFZpZXcoCiAgICAgICAgICAgICAgICAgICAgdmlldywKICAgICAgICAgICAgICAgICAgICBMaW5lYXJMYXlvdXQuTGF5b3V0UGFyYW1zKAogICAgICAgICAgICAgICAgICAgICAgICBWaWV3R3JvdXAuTGF5b3V0UGFyYW1zLk1BVENIX1BBUkVOVCwKICAgICAgICAgICAgICAgICAgICAgICAgVmlld0dyb3VwLkxheW91dFBhcmFtcy5XUkFQX0NPTlRFTlQKICAgICAgICAgICAgICAgICAgICApLmFwcGx5IHsKICAgICAgICAgICAgICAgICAgICAgICAgYm90dG9tTWFyZ2luID0gZHAoNSkKICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICApCiAgICAgICAgICAgICAgICBtb3ZlZFZpZXdzLmFkZCh2aWV3KQogICAgICAgICAgICB9CgogICAgICAgICAgICByb290LmZpbmRWaWV3V2l0aFRhZzxWaWV3PigidjIzN19sb29rX2J1dHRvbiIpCiAgICAgICAgICAgICAgICA/LnZpc2liaWxpdHkgPSBWaWV3LkdPTkUKCiAgICAgICAgICAgIGlmIChkcmF3ZXJPcGVuKSB7CiAgICAgICAgICAgICAgICBtb3ZlZFZpZXdzLmZvckVhY2ggeyBpdC52aXNpYmlsaXR5ID0gVmlldy5WSVNJQkxFIH0KICAgICAgICAgICAgICAgIHJvb3QuZmluZFZpZXdXaXRoVGFnPFZpZXc+KCJ2MjM3X2xvb2tfYnV0dG9uIikKICAgICAgICAgICAgICAgICAgICA/LnZpc2liaWxpdHkgPSBWaWV3LkdPTkUKICAgICAgICAgICAgfQogICAgICAgIH0KCiAgICAgICAgcHJpdmF0ZSBmdW4gc2V0RHJhd2VyKG9wZW46IEJvb2xlYW4pIHsKICAgICAgICAgICAgZHJhd2VyT3BlbiA9IG9wZW4KICAgICAgICAgICAgZHJhd2VyLnZpc2liaWxpdHkgPSBpZiAob3BlbikgVmlldy5WSVNJQkxFIGVsc2UgVmlldy5HT05FCiAgICAgICAgICAgIHNjcmltLnZpc2liaWxpdHkgPSBpZiAob3BlbikgVmlldy5WSVNJQkxFIGVsc2UgVmlldy5HT05FCiAgICAgICAgICAgIHNldHRpbmdzVGFiLnZpc2liaWxpdHkgPSBpZiAob3BlbikgVmlldy5HT05FIGVsc2UgVmlldy5WSVNJQkxFCgogICAgICAgICAgICBpZiAob3BlbikgewogICAgICAgICAgICAgICAgbW92ZVNldHRpbmdzSW50b0RyYXdlcigpCiAgICAgICAgICAgICAgICBtb3ZlZFZpZXdzLmZvckVhY2ggeyBpdC52aXNpYmlsaXR5ID0gVmlldy5WSVNJQkxFIH0KICAgICAgICAgICAgICAgIHJvb3QuZmluZFZpZXdXaXRoVGFnPFZpZXc+KCJ2MjM3X2xvb2tfYnV0dG9uIikKICAgICAgICAgICAgICAgICAgICA/LnZpc2liaWxpdHkgPSBWaWV3LkdPTkUKICAgICAgICAgICAgfQoKICAgICAgICAgICAgcHJvdGVjdFRvcENvbnRyb2xzKCkKICAgICAgICB9CgogICAgICAgIHByaXZhdGUgZnVuIGx1dFN0eWxlQnV0dG9uKHZhbHVlOiBTdHJpbmcpOiBCdXR0b24gPQogICAgICAgICAgICBCdXR0b24oYWN0aXZpdHkpLmFwcGx5IHsKICAgICAgICAgICAgICAgIHRleHQgPSB2YWx1ZQogICAgICAgICAgICAgICAgdGV4dFNpemUgPSA4LjJmCiAgICAgICAgICAgICAgICBpc0FsbENhcHMgPSBmYWxzZQogICAgICAgICAgICAgICAgdHlwZWZhY2UgPSBUeXBlZmFjZS5ERUZBVUxUX0JPTEQKICAgICAgICAgICAgICAgIHNldFRleHRDb2xvcihDb2xvci5XSElURSkKICAgICAgICAgICAgICAgIHNldFBhZGRpbmcoZHAoNyksIDAsIGRwKDcpLCAwKQogICAgICAgICAgICAgICAgYmFja2dyb3VuZCA9IHJvdW5kZWQoCiAgICAgICAgICAgICAgICAgICAgMHhFNjAzMTgyOS50b0ludCgpLAogICAgICAgICAgICAgICAgICAgIDB4RkY3M0I3RDkudG9JbnQoKSwKICAgICAgICAgICAgICAgICAgICAxNgogICAgICAgICAgICAgICAgKQogICAgICAgICAgICB9CgogICAgICAgIHByaXZhdGUgZnVuIHJvdW5kZWQoCiAgICAgICAgICAgIGZpbGw6IEludCwKICAgICAgICAgICAgc3Ryb2tlOiBJbnQsCiAgICAgICAgICAgIHJhZGl1czogSW50CiAgICAgICAgKTogR3JhZGllbnREcmF3YWJsZSA9CiAgICAgICAgICAgIEdyYWRpZW50RHJhd2FibGUoKS5hcHBseSB7CiAgICAgICAgICAgICAgICBzaGFwZSA9IEdyYWRpZW50RHJhd2FibGUuUkVDVEFOR0xFCiAgICAgICAgICAgICAgICBzZXRDb2xvcihmaWxsKQogICAgICAgICAgICAgICAgY29ybmVyUmFkaXVzID0gZHAocmFkaXVzKS50b0Zsb2F0KCkKICAgICAgICAgICAgICAgIHNldFN0cm9rZShkcCgxKSwgc3Ryb2tlKQogICAgICAgICAgICB9CgogICAgICAgIHByaXZhdGUgZnVuIGRwKHZhbHVlOiBJbnQpOiBJbnQgPQogICAgICAgICAgICAodmFsdWUgKiBhY3Rpdml0eS5yZXNvdXJjZXMuZGlzcGxheU1ldHJpY3MuZGVuc2l0eSkudG9JbnQoKQogICAgfQp9CicnJwpIRUxQRVIud3JpdGVfdGV4dChIRUxQRVJfU09VUkNFLCBlbmNvZGluZz0idXRmLTgiKQoKIyBSMDE0IEhBUkRFTklORzoKIyBEbyBub3QgcmV3cml0ZSBWMjM1L1YyMzYgc291cmNlIHRleHQgYnkgZXhhY3Qgc3RyaW5nIG1hdGNoaW5nLgojIFRob3NlIGNvbnRyb2xzIGtlZXAgdGhlaXIgb3JpZ2luYWwgbGlzdGVuZXJzL2Z1bmN0aW9ucyBhbmQgYXJlIHJlbGFiZWxsZWQgYXQgcnVudGltZQojIGJ5IHRoZSBkZnYyMzggc2hlbGwuIFRoaXMgYXZvaWRzIGZhaWx1cmVzIHdoZW4gdXBzdHJlYW0gd29yZGluZy9zcGFjaW5nIGNoYW5nZXMuCnByaW50KCJQQVNTOiBkZnYyMzggdmlzdWFsIGxhYmVscyB1c2UgcnVudGltZSBub3JtYWxpemF0aW9uOyBubyBmcmFnaWxlIFYyMzUvVjIzNiB0ZXh0IHBhdGNoaW5nLiIpCgpjYW1lcmEgPSBDQU1FUkEucmVhZF90ZXh0KGVuY29kaW5nPSJ1dGYtOCIpCnNoZWxsX2NhbGwgPSAnJycgICAgICAgIERldmVsb3BVZ2FuZGFEZnYyMzhDYW1lcmFTaGVsbC5hdHRhY2goCiAgICAgICAgICAgIGFjdGl2aXR5ID0gdGhpcywKICAgICAgICAgICAgcm9vdCA9IHJvb3QKICAgICAgICApCicnJwppZiAiRGV2ZWxvcFVnYW5kYURmdjIzOENhbWVyYVNoZWxsLmF0dGFjaCIgbm90IGluIGNhbWVyYToKICAgIG9wZXJhdG9yX2F0dGFjaCA9ICcnJyAgICAgICAgRGV2ZWxvcFVnYW5kYU9wZXJhdG9yRXhwZXJpZW5jZS5hdHRhY2goCiAgICAgICAgICAgIGFjdGl2aXR5ID0gdGhpcywKICAgICAgICAgICAgcm9vdCA9IHJvb3QsCiAgICAgICAgICAgIHJvbGUgPSBEZXZlbG9wVWdhbmRhT3BlcmF0b3JFeHBlcmllbmNlLlJvbGUuUkVQT1JUCiAgICAgICAgKQonJycKICAgIGlmIG9wZXJhdG9yX2F0dGFjaCBpbiBjYW1lcmE6CiAgICAgICAgY2FtZXJhID0gY2FtZXJhLnJlcGxhY2Uob3BlcmF0b3JfYXR0YWNoLCBvcGVyYXRvcl9hdHRhY2ggKyBzaGVsbF9jYWxsLCAxKQogICAgZWxzZToKICAgICAgICAjIE1vZGVybiByZXRhaW5lZCBzb3VyY2UgbWF5IGhhdmUgc3BhY2luZyBjaGFuZ2VzOyBpbnNlcnQgYWZ0ZXIgdGhlIFJFUE9SVCBvcGVyYXRvciBibG9jay4KICAgICAgICBpbXBvcnQgcmUKICAgICAgICBwYXR0ZXJuID0gcmUuY29tcGlsZSgKICAgICAgICAgICAgcicoXHMqRGV2ZWxvcFVnYW5kYU9wZXJhdG9yRXhwZXJpZW5jZVwuYXR0YWNoXChccyphY3Rpdml0eVxzKj1ccyp0aGlzLFxzKnJvb3Rccyo9XHMqcm9vdCxccypyb2xlXHMqPVxzKkRldmVsb3BVZ2FuZGFPcGVyYXRvckV4cGVyaWVuY2VcLlJvbGVcLlJFUE9SVFxzKlwpXHMqKScsCiAgICAgICAgICAgIHJlLlMKICAgICAgICApCiAgICAgICAgbSA9IHBhdHRlcm4uc2VhcmNoKGNhbWVyYSkKICAgICAgICBpZiBub3QgbToKICAgICAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiZGZ2MjM4IHJlc2V0IGNvdWxkIG5vdCBmaW5kIHJldGFpbmVkIFYyMzggUkVQT1JUIG9wZXJhdG9yIGF0dGFjaCIpCiAgICAgICAgY2FtZXJhID0gY2FtZXJhWzptLmVuZCgpXSArICJcbiIgKyBzaGVsbF9jYWxsICsgY2FtZXJhW20uZW5kKCk6XQpDQU1FUkEud3JpdGVfdGV4dChjYW1lcmEsIGVuY29kaW5nPSJ1dGYtOCIpCgpzdG9yeSA9IFNUT1JZLnJlYWRfdGV4dChlbmNvZGluZz0idXRmLTgiKQojIEtlZXAgc3Rvcnkvb3V0cHV0IGxvZ2ljOyBvbmx5IHN0YW1wIHRoZSByZXNldCBuYW1lIHdoZXJlIGFuIGFwcF92ZXJzaW9uIGxpdGVyYWwgZXhpc3RzLgpzdG9yeSA9IHJlLnN1YihyJ1wucHV0XCgiYXBwX3ZlcnNpb24iLFxzKiJbXiJdKyJcKScsICcucHV0KCJhcHBfdmVyc2lvbiIsICJkZnYyMzgtcmVzZXQtbWFzdGVyIiknLCBzdG9yeSwgY291bnQ9MSkKU1RPUlkud3JpdGVfdGV4dChzdG9yeSwgZW5jb2Rpbmc9InV0Zi04IikKCmdyYWRsZSA9IEdSQURMRS5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04IikKZ3JhZGxlID0gcmUuc3ViKHIndmVyc2lvbkNvZGVccyo9XHMqXGQrJywgJ3ZlcnNpb25Db2RlID0gMjgxNDAnLCBncmFkbGUsIGNvdW50PTEpCmdyYWRsZSA9IHJlLnN1YihyJ3ZlcnNpb25OYW1lXHMqPVxzKiJbXiJdKyInLCAndmVyc2lvbk5hbWUgPSAiZGZ2MjM4LXJlc2V0LW1hc3RlciInLCBncmFkbGUsIGNvdW50PTEpCiMgU2VwYXJhdGUgaW5zdGFsbCBpZGVudGl0eSB3aXRob3V0IHJld3JpdGluZyBLb3RsaW4gcGFja2FnZXMvbmFtZXNwYWNlcy4KaWYgcmUuc2VhcmNoKHInYXBwbGljYXRpb25JZFxzKj1ccyoiW14iXSsiJywgZ3JhZGxlKToKICAgIGdyYWRsZSA9IHJlLnN1YihyJ2FwcGxpY2F0aW9uSWRccyo9XHMqIlteIl0rIicsICdhcHBsaWNhdGlvbklkID0gImNvbS5zZW50b25nb2hhcnVuYS5kZnYyMzhyZXNldCInLCBncmFkbGUsIGNvdW50PTEpCkdSQURMRS53cml0ZV90ZXh0KGdyYWRsZSwgZW5jb2Rpbmc9InV0Zi04IikKClJFQURNRS53cml0ZV90ZXh0KAogICAgJycnZGV2ZWxvcC51Z2FuZGEgZGZ2MjM4CgpCQVNFCi0gUkVTRVQgTUFTVEVSIHJlc3RvcmVzIHRoZSBkZnYyMzgvVjIzOCBjYW1lcmEgZGVzaWduIGxhdyBvbiB0aGUgcHJvdmVuIGJ1aWxkYWJsZSBzb3VyY2UuCi0gUjAxMS9SMDEyL1IwMTMgSFVEIHByb3ZpZGVycyBhcmUgbm90IHVzZWQuCi0gQ2FtZXJhWCByZWNvcmRpbmcvb3V0cHV0IGxvZ2ljIGlzIG5vdCByZXBsYWNlZCBieSB0aGlzIHJlc2V0IHNoZWxsLgoKQ0FNIFJFUE9SVEVSIENBTUVSQQotIExVVFMgaXMgcGVybWFuZW50IGF0IHRoZSB0b3AtbGVmdCBhbmQgY2Fubm90IGJlIGhpZGRlbiBieSBWMjM4IENMRUFOIFZJRVcuCi0gQVNQRUNUIGlzIHBlcm1hbmVudCBhdCB0aGUgdG9wLXJpZ2h0LgotIExVVFMga2VlcHMgdGhlIHJlYWwgVjIzNSBVZ2FuZGEgTFVUIE1peGVyIGZ1bmN0aW9uIGFuZCBzdHlsaW5nLgotIEFTUEVDVCBrZWVwcyB0aGUgcmVhbCBWMjM2IGZvcm1hdC9zYWZlLWZyYW1lIGZ1bmN0aW9uLgotIExFTlMgLyBSRUNPUkQgLyBMSUdIVCByZW1haW4gYXZhaWxhYmxlIGZvciBzaG9vdGluZy4KLSBPdGhlciBWMjM4IGNhbWVyYSBjb250cm9scyBhcmUgbW92ZWQsIG5vdCBkZWxldGVkLCBpbnRvIGEgcmlnaHQtc2lkZSBTRVRUSU5HUyBkcmF3ZXIuCi0gRXhpc3RpbmcgYnV0dG9uIGxpc3RlbmVycy9mdW5jdGlvbnMgYXJlIHByZXNlcnZlZCB3aGVuIHRoZWlyIHJvd3MgbW92ZSBpbnRvIHRoZSBkcmF3ZXIuCi0gVGhlIGR1cGxpY2F0ZSBsZWdhY3kgTE9PSyBjb250cm9sIGlzIGhpZGRlbiBzbyBMVVRTIHJlbWFpbnMgdGhlIHNpbmdsZSBwcmltYXJ5IGxvb2sgY29udHJvbC4KClBST1RFQ1RFRCBDT0xPUiBGVU5DVElPTgotIERldmVsb3BVZ2FuZGFDb2xvckVuZ2luZS5rdCB1bmNoYW5nZWQuCi0gRGV2ZWxvcFVnYW5kYUNvbG9yVHVuZXIua3QgdW5jaGFuZ2VkLgotIERldmVsb3BVZ2FuZGFFdmVyeWRheUNvbG9yTWl4ZXIua3QgdW5jaGFuZ2VkLgotIERldmVsb3BVZ2FuZGFOYXZ5U2hlZXQua3QgdW5jaGFuZ2VkLgotIENhbWVyYVggcmVjb3JkaW5nL291dHB1dCBjb2RlIGlzIG5vdCByZXBsYWNlZC4KLSBWMjM1L1YyMzYgc291cmNlIGlzIG5vdCByZXdyaXR0ZW4gYnkgZXhhY3QgdGV4dDsgdGhlIGRmdjIzOCBzaGVsbCBub3JtYWxpemVzIExVVFMvQVNQRUNUIGxhYmVscyBhdCBydW50aW1lLgoKSE9NRQotIFYyMzggaG9tZSBzdHJ1Y3R1cmUgaXMgbm90IHJlZGVzaWduZWQgYnkgdGhpcyBwYXRjaC4KClZFUlNJT04KLSB2ZXJzaW9uQ29kZSAyODE0MAotIHZlcnNpb25OYW1lIGRmdjIzOC1yZXNldC1tYXN0ZXIKJycnLAogICAgZW5jb2Rpbmc9InV0Zi04IgopCgpwcmludCgiUEFTUzogZGZ2MjM4IFJFU0VUIE1BU1RFUiBzaGVsbCBhcHBsaWVkIikK' | base64 -d > /tmp/dfv238_reset_master.py
+          python3 -m py_compile /tmp/dfv238_reset_master.py
+          python3 /tmp/dfv238_reset_master.py
+
+          # Remove the provider source itself only after its manifest registration is gone.
+          rm -f "$SRC/DevelopUgandaV28033454CleanHudProvider.kt"
+
+          # Minimal checks only: no fragile false-red preflight.
+          test -f "$SRC/DevelopUgandaDfv238CameraShell.kt"
+          grep -q 'DevelopUgandaDfv238CameraShell.attach' "$SRC/DevelopUgandaCameraActivity.kt"
+          grep -q 'v237_camera_action_row' "$SRC/DevelopUgandaDfv238CameraShell.kt"
+          grep -q 'LUTS is permanent' "$SRC/DevelopUgandaDfv238CameraShell.kt"
+          grep -q 'versionCode = 28140' v172-source/app/build.gradle.kts
+          grep -q 'versionName = "dfv238-reset-master"' v172-source/app/build.gradle.kts
+          echo 'PASS: DFV238 RESET MASTER source prepared.'
+
+      - name: Harden R015 camera permissions without replacing CameraX
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYR15PERM'
+          from pathlib import Path
+          import re
+
+          manifest = Path('v172-source/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text(encoding='utf-8')
+
+          # Camera preview and video audio need these Android permissions.
+          # Add only when missing; do not touch CameraX binding/recording code.
+          wanted = [
+              'android.permission.CAMERA',
+              'android.permission.RECORD_AUDIO',
+          ]
+          missing = [p for p in wanted if p not in text]
+          if missing:
+              m = re.search(r'<manifest\b[^>]*>', text, flags=re.S)
+              if not m:
+                  raise SystemExit('R015 manifest has no <manifest> tag')
+              additions = ''.join(
+                  f'\n    <uses-permission android:name="{perm}" />' for perm in missing
+              )
+              text = text[:m.end()] + additions + text[m.end():]
+              manifest.write_text(text, encoding='utf-8')
+
+          now = manifest.read_text(encoding='utf-8')
+          for perm in wanted:
+              if perm not in now:
+                  raise SystemExit(f'R015 required permission missing after hardening: {perm}')
+
+          print('PASS: R015 CAMERA + RECORD_AUDIO permissions present; CameraX source left unchanged.')
+          PYR15PERM
+
+      - name: Stamp R015 camera identity and audit dfv238 contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYR15'
+          from pathlib import Path
+          import re
+
+          ROOT = Path('v172-source')
+          SRC = ROOT / 'app/src/main/java/com/sentongoharuna/pulse'
+          GRADLE = ROOT / 'app/build.gradle.kts'
+          MANIFEST = ROOT / 'app/src/main/AndroidManifest.xml'
+          STRINGS = ROOT / 'app/src/main/res/values/strings.xml'
+          SHELL = SRC / 'DevelopUgandaDfv238CameraShell.kt'
+          CAMERA = SRC / 'DevelopUgandaCameraActivity.kt'
+
+          required = [GRADLE, MANIFEST, SHELL, CAMERA]
+          missing = [str(p) for p in required if not p.exists()]
+          if missing:
+              raise SystemExit('R015 required camera source missing: ' + ', '.join(missing))
+
+          # Keep the dfv238 reset source exactly as the design base, then give R015
+          # its own install identity so it can sit beside earlier test builds.
+          g = GRADLE.read_text(encoding='utf-8')
+          g, n1 = re.subn(r'versionCode\s*=\s*\d+', 'versionCode = 400000023', g, count=1)
+          g, n2 = re.subn(r'versionName\s*=\s*"[^"]+"', 'versionName = "1.0-r015-dfv238-camera-stable"', g, count=1)
+          if re.search(r'applicationId\s*=\s*"[^"]+"', g):
+              g, n3 = re.subn(
+                  r'applicationId\s*=\s*"[^"]+"',
+                  'applicationId = "com.sentongoharuna.pulse.preview.r015dfv238"',
+                  g,
+                  count=1,
+              )
+          else:
+              n3 = 0
+          if n1 != 1 or n2 != 1 or n3 != 1:
+              raise SystemExit(f'R015 Gradle identity update failed: versionCode={n1}, versionName={n2}, applicationId={n3}')
+          GRADLE.write_text(g, encoding='utf-8')
+
+          STRINGS.parent.mkdir(parents=True, exist_ok=True)
+          if STRINGS.exists():
+              s = STRINGS.read_text(encoding='utf-8')
+              if re.search(r'<string\s+name="app_name"[^>]*>.*?</string>', s, flags=re.S):
+                  s = re.sub(
+                      r'<string\s+name="app_name"[^>]*>.*?</string>',
+                      '<string name="app_name">DU Camera R015</string>',
+                      s,
+                      count=1,
+                      flags=re.S,
+                  )
+              elif '</resources>' in s:
+                  s = s.replace('</resources>', '    <string name="app_name">DU Camera R015</string>\n</resources>', 1)
+              else:
+                  raise SystemExit('R015 strings.xml has no </resources>')
+          else:
+              s = '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">DU Camera R015</string>\n</resources>\n'
+          STRINGS.write_text(s, encoding='utf-8')
+
+          m = MANIFEST.read_text(encoding='utf-8')
+          app = re.search(r'<application\b[^>]*>', m, flags=re.S)
+          if not app:
+              raise SystemExit('R015 AndroidManifest has no <application> tag')
+          tag = app.group(0)
+          if re.search(r'android:label\s*=\s*"[^"]+"', tag):
+              new_tag = re.sub(r'android:label\s*=\s*"[^"]+"', 'android:label="@string/app_name"', tag, count=1)
+          else:
+              new_tag = tag[:-1] + ' android:label="@string/app_name">'
+          m = m[:app.start()] + new_tag + m[app.end():]
+          MANIFEST.write_text(m, encoding='utf-8')
+
+          shell = SHELL.read_text(encoding='utf-8')
+          camera = CAMERA.read_text(encoding='utf-8')
+          manifest_now = MANIFEST.read_text(encoding='utf-8')
+
+          checks = {
+              'dfv238 shell attached': 'DevelopUgandaDfv238CameraShell.attach' in camera,
+              'LUTS protected': 'LUTS is permanent' in shell,
+              'ASPECT protected': 'ASPECT and LUTS are the only two persistent top camera controls' in shell,
+              'shooting action row protected': 'v237_camera_action_row' in shell,
+              'right SETTINGS drawer present': 'CAMERA SETTINGS' in shell and 'setDrawer' in shell,
+              'late CleanHudProvider disabled': 'V28033454CleanHudProvider' not in manifest_now and 'CleanHudProvider' not in manifest_now,
+              'R015 version name': '1.0-r015-dfv238-camera-stable' in GRADLE.read_text(encoding='utf-8'),
+              'R015 application id': 'com.sentongoharuna.pulse.preview.r015dfv238' in GRADLE.read_text(encoding='utf-8'),
+              'CAMERA permission present': 'android.permission.CAMERA' in manifest_now,
+              'RECORD_AUDIO permission present': 'android.permission.RECORD_AUDIO' in manifest_now,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          report = ['R015 DFV238 CAMERA CONTRACT AUDIT', '================================']
+          report += [f'{"PASS" if ok else "FAIL"}  {name}' for name, ok in checks.items()]
+          report.append(f'Camera click listeners: {camera.count("setOnClickListener")}')
+          report.append(f'Shell click listeners: {shell.count("setOnClickListener")}')
+          Path('/tmp/R015-DFV238-CAMERA-AUDIT.txt').write_text('\n'.join(report) + '\n', encoding='utf-8')
+          print('\n'.join(report))
+          if failed:
+              raise SystemExit('R015 dfv238 camera contract failed: ' + ', '.join(failed))
+          PYR15
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build DU Camera R015 APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee du-camera-r015-build.log
+
+      - name: Prepare DU Camera R015 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp v172-source/app/build/outputs/apk/debug/app-debug.apk DU-Camera-R015-DFV238-CAMERA-STABLE.apk
+          ls -lh DU-Camera-R015-DFV238-CAMERA-STABLE.apk
+
+      - name: Upload R015 dfv238 camera audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R015-DFV238-CAMERA-AUDIT
+          path: /tmp/R015-DFV238-CAMERA-AUDIT.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload DU Camera R015 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R015-DFV238-CAMERA-STABLE
+          path: DU-Camera-R015-DFV238-CAMERA-STABLE.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R015-BUILD-LOG
+          path: v172-source/du-camera-r015-build.log
+          if-no-files-found: warn
+          retention-days: 7
