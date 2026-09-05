@@ -1,0 +1,238 @@
+name: Build DU Camera R016 DIRECT CAMERA APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R016-DIRECT-CAMERA.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r016_direct_camera:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare proven R016 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYBASE'
+          from pathlib import Path
+          import os, re, subprocess, tempfile
+          
+          workflow = Path('.github/workflows/BUILD-DU-CAMERA-R015-APK-ONLY.yml')
+          if not workflow.exists():
+              raise SystemExit('Missing proven R015 APK-only workflow')
+          lines = workflow.read_text(encoding='utf-8').splitlines()
+          wanted = [
+              'Replay proven V280-33.4.5.4 clean HUD source',
+              'Restore dfv238 master camera law and remove late HUD provider',
+              'Harden R015 camera permissions without replacing CameraX',
+              'Stamp R015 camera identity and audit dfv238 contract',
+          ]
+          
+          def indent(s):
+              return len(s) - len(s.lstrip(' '))
+          
+          def extract(name):
+              for i, line in enumerate(lines):
+                  m = re.match(r'^(\s*)- name:\s*(.+?)\s*$', line)
+                  if not m or m.group(2) != name:
+                      continue
+                  step_indent = len(m.group(1))
+                  end = len(lines)
+                  for j in range(i + 1, len(lines)):
+                      mm = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[j])
+                      if mm and len(mm.group(1)) == step_indent:
+                          end = j
+                          break
+                  for j in range(i + 1, end):
+                      if lines[j].strip() == 'run: |':
+                          run_indent = indent(lines[j])
+                          content_indent = run_indent + 2
+                          block = []
+                          for k in range(j + 1, end):
+                              ln = lines[k]
+                              if not ln.strip():
+                                  block.append('')
+                                  continue
+                              if indent(ln) <= run_indent:
+                                  break
+                              block.append(ln[content_indent:])
+                          return '\n'.join(block) + '\n'
+              raise SystemExit('Could not extract step: ' + name)
+          
+          for name in wanted:
+              script = extract(name)
+              print('\n===== R016 DIRECT BASE: ' + name + ' =====', flush=True)
+              with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as f:
+                  f.write(script)
+                  temp = f.name
+              try:
+                  r = subprocess.run(['bash', temp], cwd=str(Path.cwd()), env=os.environ.copy())
+              finally:
+                  Path(temp).unlink(missing_ok=True)
+              if r.returncode:
+                  raise SystemExit(r.returncode)
+          
+          print('PASS: proven R016 source prepared.')
+          PYBASE
+
+      - name: Install direct real CameraX activity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYDIRECT'
+          from pathlib import Path
+          import re
+          
+          ROOT = Path('v172-source')
+          SRC = ROOT / 'app/src/main/java/com/sentongoharuna/pulse'
+          MANIFEST = ROOT / 'app/src/main/AndroidManifest.xml'
+          GRADLE = ROOT / 'app/build.gradle.kts'
+          STRINGS = ROOT / 'app/src/main/res/values/strings.xml'
+          HUB = SRC / 'DevelopUgandaGeneralHubActivity.kt'
+          DIRECT = SRC / 'DevelopUgandaR16DirectCameraActivity.kt'
+          
+          DIRECT.write_text('package com.sentongoharuna.pulse\n\nimport android.Manifest\nimport android.content.ContentValues\nimport android.content.Intent\nimport android.content.pm.PackageManager\nimport android.graphics.Color\nimport android.graphics.drawable.GradientDrawable\nimport android.os.Build\nimport android.os.Bundle\nimport android.provider.MediaStore\nimport android.view.Gravity\nimport android.view.View\nimport android.view.WindowManager\nimport android.widget.FrameLayout\nimport android.widget.LinearLayout\nimport android.widget.TextView\nimport androidx.appcompat.app.AppCompatActivity\nimport androidx.camera.core.Camera\nimport androidx.camera.core.CameraSelector\nimport androidx.camera.core.Preview\nimport androidx.camera.lifecycle.ProcessCameraProvider\nimport androidx.camera.video.MediaStoreOutputOptions\nimport androidx.camera.video.Quality\nimport androidx.camera.video.QualitySelector\nimport androidx.camera.video.Recorder\nimport androidx.camera.video.Recording\nimport androidx.camera.video.VideoCapture\nimport androidx.camera.video.VideoRecordEvent\nimport androidx.camera.view.PreviewView\nimport androidx.core.content.ContextCompat\nimport java.text.SimpleDateFormat\nimport java.util.Date\nimport java.util.Locale\n\nclass DevelopUgandaR16DirectCameraActivity : AppCompatActivity() {\n    private lateinit var preview: PreviewView\n    private lateinit var status: TextView\n    private lateinit var rec: TextView\n    private lateinit var tint: View\n    private var provider: ProcessCameraProvider? = null\n    private var camera: Camera? = null\n    private var video: VideoCapture<Recorder>? = null\n    private var recording: Recording? = null\n    private var front = false\n    private var torch = false\n    private var lut = 0\n\n    override fun onCreate(state: Bundle?) {\n        super.onCreate(state)\n        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)\n        window.statusBarColor = Color.BLACK\n        window.navigationBarColor = Color.BLACK\n        buildUi()\n        if (cameraGranted()) openCamera() else requestPermissions(\n            arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO), 1515\n        )\n    }\n\n    private fun buildUi() {\n        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }\n        preview = PreviewView(this).apply {\n            implementationMode = PreviewView.ImplementationMode.COMPATIBLE\n            scaleType = PreviewView.ScaleType.FILL_CENTER\n            setBackgroundColor(Color.BLACK)\n        }\n        root.addView(preview, FrameLayout.LayoutParams(-1, -1))\n\n        tint = View(this).apply { setBackgroundColor(Color.TRANSPARENT); isClickable = false }\n        root.addView(tint, FrameLayout.LayoutParams(-1, -1))\n\n        val luts = button("LUTS")\n        root.addView(luts, FrameLayout.LayoutParams(dp(90), dp(46), Gravity.TOP or Gravity.START).apply {\n            leftMargin = dp(14); topMargin = dp(18)\n        })\n        luts.setOnClickListener {\n            lut = (lut + 1) % 4\n            val names = arrayOf("LUTS", "WARM", "COOL", "NIGHT")\n            val colors = intArrayOf(Color.TRANSPARENT, 0x18FF9A22, 0x180066FF, 0x1400A080)\n            luts.text = names[lut]\n            tint.setBackgroundColor(colors[lut])\n        }\n\n        val aspect = button("ASPECT")\n        root.addView(aspect, FrameLayout.LayoutParams(dp(100), dp(46), Gravity.TOP or Gravity.END).apply {\n            rightMargin = dp(14); topMargin = dp(18)\n        })\n        aspect.setOnClickListener {\n            preview.scaleType = if (preview.scaleType == PreviewView.ScaleType.FILL_CENTER)\n                PreviewView.ScaleType.FIT_CENTER else PreviewView.ScaleType.FILL_CENTER\n            aspect.text = if (preview.scaleType == PreviewView.ScaleType.FILL_CENTER) "ASPECT" else "FIT"\n        }\n\n        status = button("OPENING")\n        root.addView(status, FrameLayout.LayoutParams(dp(170), dp(40), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {\n            topMargin = dp(78)\n        })\n        status.setOnClickListener { if (cameraGranted()) openCamera() else requestPermissions(arrayOf(Manifest.permission.CAMERA), 1515) }\n\n        val settings = button("SETTINGS")\n        root.addView(settings, FrameLayout.LayoutParams(dp(105), dp(44), Gravity.CENTER_VERTICAL or Gravity.END).apply {\n            rightMargin = dp(12)\n        })\n        settings.setOnClickListener { startActivity(Intent(this, DevelopUgandaGeneralHubActivity::class.java)) }\n\n        val bar = LinearLayout(this).apply {\n            orientation = LinearLayout.HORIZONTAL\n            gravity = Gravity.CENTER\n            setPadding(dp(8), dp(8), dp(8), dp(16))\n            setBackgroundColor(0x66000000)\n        }\n        val lens = button("LENS")\n        rec = button("RECORD")\n        val light = button("LIGHT")\n        for (v in arrayOf(lens, rec, light)) bar.addView(v, LinearLayout.LayoutParams(0, dp(58), 1f).apply {\n            marginStart = dp(5); marginEnd = dp(5)\n        })\n        root.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))\n\n        lens.setOnClickListener {\n            recording?.stop()\n            front = !front\n            openCamera()\n        }\n        light.setOnClickListener { toggleTorch(light) }\n        rec.setOnClickListener { toggleRecord() }\n        setContentView(root)\n    }\n\n    private fun openCamera() {\n        if (!cameraGranted()) { status.text = "ALLOW CAMERA"; return }\n        status.text = "OPENING"\n        val future = ProcessCameraProvider.getInstance(this)\n        future.addListener({\n            try {\n                val p = future.get()\n                provider = p\n                val px = Preview.Builder().build()\n                px.setSurfaceProvider(preview.surfaceProvider)\n                val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.FHD)).build()\n                val vc = VideoCapture.withOutput(recorder)\n                val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA\n                p.unbindAll()\n                camera = p.bindToLifecycle(this, selector, px, vc)\n                video = vc\n                torch = false\n                status.text = "LIVE"\n            } catch (e: Throwable) {\n                status.text = "CAMERA ERROR - TAP"\n            }\n        }, ContextCompat.getMainExecutor(this))\n    }\n\n    private fun toggleTorch(v: TextView) {\n        val c = camera ?: return\n        if (!c.cameraInfo.hasFlashUnit()) { status.text = "NO FLASH"; return }\n        torch = !torch\n        c.cameraControl.enableTorch(torch)\n        v.text = if (torch) "LIGHT ON" else "LIGHT"\n    }\n\n    private fun toggleRecord() {\n        recording?.let { it.stop(); return }\n        val vc = video ?: run { status.text = "CAMERA NOT READY"; return }\n        val name = "DU_R16_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())\n        val values = ContentValues().apply {\n            put(MediaStore.Video.Media.DISPLAY_NAME, name)\n            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")\n            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/DU Camera")\n        }\n        val out = MediaStoreOutputOptions.Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)\n            .setContentValues(values).build()\n        var pending = vc.output.prepareRecording(this, out)\n        if (audioGranted()) pending = pending.withAudioEnabled()\n        recording = pending.start(ContextCompat.getMainExecutor(this)) { ev ->\n            when (ev) {\n                is VideoRecordEvent.Start -> { rec.text = "STOP"; status.text = "RECORDING" }\n                is VideoRecordEvent.Finalize -> {\n                    recording = null; rec.text = "RECORD"\n                    status.text = if (ev.hasError()) "SAVE ERROR" else "SAVED"\n                }\n            }\n        }\n    }\n\n    override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, results: IntArray) {\n        super.onRequestPermissionsResult(code, permissions, results)\n        if (code == 1515) {\n            if (cameraGranted()) openCamera() else status.text = "ALLOW CAMERA - TAP"\n        }\n    }\n\n    override fun onDestroy() {\n        recording?.stop()\n        provider?.unbindAll()\n        super.onDestroy()\n    }\n\n    private fun cameraGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED\n    private fun audioGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED\n\n    private fun button(label: String) = TextView(this).apply {\n        text = label; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER\n        background = GradientDrawable().apply {\n            setColor(0xD9111111.toInt()); cornerRadius = dp(12).toFloat(); setStroke(dp(1), 0xFFFFB323.toInt())\n        }\n    }\n    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()\n}\n', encoding='utf-8')
+          
+          g = GRADLE.read_text(encoding='utf-8')
+          g, a = re.subn(r'versionCode\s*=\s*\d+', 'versionCode = 400000027', g, count=1)
+          g, b = re.subn(r'versionName\s*=\s*"[^"]+"', 'versionName = "1.0-r016-direct-camera"', g, count=1)
+          g, c = re.subn(r'applicationId\s*=\s*"[^"]+"', 'applicationId = "com.sentongoharuna.pulse.preview.r016direct"', g, count=1)
+          if (a, b, c) != (1, 1, 1):
+              raise SystemExit(f'Identity update failed: {a}, {b}, {c}')
+          GRADLE.write_text(g, encoding='utf-8')
+          
+          s = STRINGS.read_text(encoding='utf-8')
+          s = re.sub(
+              r'<string\s+name="app_name"[^>]*>.*?</string>',
+              '<string name="app_name">DU Camera R016 DIRECT</string>',
+              s,
+              count=1,
+              flags=re.S,
+          )
+          STRINGS.write_text(s, encoding='utf-8')
+          
+          manifest = MANIFEST.read_text(encoding='utf-8')
+          hub_pat = re.compile(
+              r'(<activity\b[^>]*android:name="com\.sentongoharuna\.pulse\.DevelopUgandaGeneralHubActivity"[^>]*>)(.*?)(</activity>)',
+              flags=re.S,
+          )
+          m = hub_pat.search(manifest)
+          if not m:
+              raise SystemExit('GeneralHubActivity manifest block missing')
+          body = m.group(2)
+          for filt in re.findall(r'\s*<intent-filter\b[^>]*>.*?</intent-filter>', body, flags=re.S):
+              if 'android.intent.action.MAIN' in filt and 'android.intent.category.LAUNCHER' in filt:
+                  body = body.replace(filt, '', 1)
+          manifest = manifest[:m.start()] + m.group(1) + body + m.group(3) + manifest[m.end():]
+          
+          direct_name = 'com.sentongoharuna.pulse.DevelopUgandaR16DirectCameraActivity'
+          manifest = re.sub(
+              r'\s*<activity\b[^>]*android:name="' + re.escape(direct_name) + r'"[^>]*>.*?</activity>',
+              '',
+              manifest,
+              flags=re.S,
+          )
+          entry = (
+              '\n        <activity android:name="' + direct_name + '" android:exported="true" android:screenOrientation="portrait">\n'
+              '            <intent-filter>\n'
+              '                <action android:name="android.intent.action.MAIN" />\n'
+              '                <category android:name="android.intent.category.LAUNCHER" />\n'
+              '            </intent-filter>\n'
+              '        </activity>\n'
+          )
+          manifest = manifest.replace('</application>', entry + '    </application>', 1)
+          MANIFEST.write_text(manifest, encoding='utf-8')
+          
+          if HUB.exists():
+              h = HUB.read_text(encoding='utf-8')
+              h = h.replace('DevelopUgandaCameraActivity::class.java', 'DevelopUgandaR16DirectCameraActivity::class.java')
+              HUB.write_text(h, encoding='utf-8')
+          
+          checks = {
+              'direct activity': DIRECT.exists(),
+              'surface provider': 'setSurfaceProvider(preview.surfaceProvider)' in DIRECT.read_text(encoding='utf-8'),
+              'lifecycle bind': 'bindToLifecycle(this, selector, px, vc)' in DIRECT.read_text(encoding='utf-8'),
+              'runtime camera permission': 'requestPermissions' in DIRECT.read_text(encoding='utf-8'),
+              'launcher': direct_name in MANIFEST.read_text(encoding='utf-8'),
+              'fresh app id': 'com.sentongoharuna.pulse.preview.r016direct' in GRADLE.read_text(encoding='utf-8'),
+          }
+          failed = [k for k, v in checks.items() if not v]
+          report = ['R016 DIRECT CAMERA AUDIT'] + [f'{"PASS" if v else "FAIL"} {k}' for k, v in checks.items()]
+          Path('/tmp/R016-DIRECT-CAMERA-AUDIT.txt').write_text('\n'.join(report) + '\n', encoding='utf-8')
+          print('\n'.join(report))
+          if failed:
+              raise SystemExit('Direct camera audit failed: ' + ', '.join(failed))
+          PYDIRECT
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build R016 DIRECT CAMERA APK
+        working-directory: v172-source
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee r016-direct-build.log
+
+      - name: Prepare APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='v172-source/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R016-DIRECT-CAMERA.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R016-DIRECT-CAMERA-AUDIT
+          path: /tmp/R016-DIRECT-CAMERA-AUDIT.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R016-DIRECT-CAMERA
+          path: DU-Camera-R016-DIRECT-CAMERA.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R016-DIRECT-CAMERA-BUILD-LOG
+          path: v172-source/r016-direct-build.log
+          if-no-files-found: warn
+          retention-days: 7
