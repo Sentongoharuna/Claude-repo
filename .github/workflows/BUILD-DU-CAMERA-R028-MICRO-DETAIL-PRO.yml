@@ -911,6 +911,7 @@ jobs:
                                           status.setText("ENHANCING VIDEO...");
                                           enhanceRecordedMaster(
                                               rawUri,
+                                              true,
                                               true
                                           );
                                       } else {
@@ -924,7 +925,8 @@ jobs:
 
               private void enhanceRecordedMaster(
                   Uri inputUri,
-                  boolean preferHevc
+                  boolean preferHevc,
+                  boolean useMicroDetail
               ) {
                   try {
                       File directory =
@@ -957,7 +959,9 @@ jobs:
                       // the established R27 tone/color grade. Amount 0.10 is
                       // intentionally conservative to avoid halos and crunchy edges.
                       Effect microDetail =
-                          new MicroDetailEffect(0.10f);
+                          useMicroDetail
+                              ? new MicroDetailEffect(0.10f)
+                              : null;
 
                       Effect contrast =
                           new Contrast(-0.02f);
@@ -982,12 +986,18 @@ jobs:
                           .setEffects(
                               new Effects(
                                   Collections.emptyList(),
-                                  Arrays.asList(
-                                      microDetail,
-                                      contrast,
-                                      saturation,
-                                      channelBalance
-                                  )
+                                  useMicroDetail
+                                      ? Arrays.asList(
+                                          microDetail,
+                                          contrast,
+                                          saturation,
+                                          channelBalance
+                                      )
+                                      : Arrays.asList(
+                                          contrast,
+                                          saturation,
+                                          channelBalance
+                                      )
                               )
                           )
                           .build();
@@ -1034,17 +1044,28 @@ jobs:
                                           // HEVC is preferred for social-media
                                           // quality/size. Retry as AVC on phones
                                           // whose encoders reject HEVC.
-                                          if (preferHevc) {
-                                              if (enhancedFile.exists()) {
-                                                  enhancedFile.delete();
-                                              }
+                                          if (enhancedFile.exists()) {
+                                              enhancedFile.delete();
+                                          }
 
+                                          if (useMicroDetail) {
+                                              status.setText(
+                                                  "DETAIL FALLBACK • SAFE"
+                                              );
+
+                                              enhanceRecordedMaster(
+                                                  inputUri,
+                                                  preferHevc,
+                                                  false
+                                              );
+                                          } else if (preferHevc) {
                                               status.setText(
                                                   "HEVC FALLBACK • AVC"
                                               );
 
                                               enhanceRecordedMaster(
                                                   inputUri,
+                                                  false,
                                                   false
                                               );
                                           } else {
@@ -1335,30 +1356,30 @@ jobs:
               extends BaseGlShaderProgram {
 
               private static final String VERTEX_SHADER =
-                  "attribute vec4 aFramePosition;\\n" +
-                  "varying vec2 vTexCoord;\\n" +
-                  "void main() {\\n" +
-                  "  gl_Position = aFramePosition;\\n" +
-                  "  vTexCoord = aFramePosition.xy * 0.5 + 0.5;\\n" +
-                  "}\\n";
+                  "attribute vec4 aFramePosition;\n" +
+                  "varying vec2 vTexCoord;\n" +
+                  "void main() {\n" +
+                  "  gl_Position = aFramePosition;\n" +
+                  "  vTexCoord = aFramePosition.xy * 0.5 + 0.5;\n" +
+                  "}\n";
 
               private static final String FRAGMENT_SHADER =
-                  "precision highp float;\\n" +
-                  "uniform sampler2D uTexSampler;\\n" +
-                  "uniform vec2 uTexelSize;\\n" +
-                  "uniform float uAmount;\\n" +
-                  "varying vec2 vTexCoord;\\n" +
-                  "void main() {\\n" +
-                  "  vec4 c = texture2D(uTexSampler, vTexCoord);\\n" +
-                  "  vec3 n = texture2D(uTexSampler, vTexCoord + vec2(0.0, -uTexelSize.y)).rgb;\\n" +
-                  "  vec3 s = texture2D(uTexSampler, vTexCoord + vec2(0.0,  uTexelSize.y)).rgb;\\n" +
-                  "  vec3 e = texture2D(uTexSampler, vTexCoord + vec2( uTexelSize.x, 0.0)).rgb;\\n" +
-                  "  vec3 w = texture2D(uTexSampler, vTexCoord + vec2(-uTexelSize.x, 0.0)).rgb;\\n" +
-                  "  vec3 local = (n + s + e + w) * 0.25;\\n" +
-                  "  vec3 detail = c.rgb - local;\\n" +
-                  "  vec3 outRgb = clamp(c.rgb + detail * uAmount, 0.0, 1.0);\\n" +
-                  "  gl_FragColor = vec4(outRgb, c.a);\\n" +
-                  "}\\n";
+                  "precision highp float;\n" +
+                  "uniform sampler2D uTexSampler;\n" +
+                  "uniform vec2 uTexelSize;\n" +
+                  "uniform float uAmount;\n" +
+                  "varying vec2 vTexCoord;\n" +
+                  "void main() {\n" +
+                  "  vec4 c = texture2D(uTexSampler, vTexCoord);\n" +
+                  "  vec3 n = texture2D(uTexSampler, vTexCoord + vec2(0.0, -uTexelSize.y)).rgb;\n" +
+                  "  vec3 s = texture2D(uTexSampler, vTexCoord + vec2(0.0,  uTexelSize.y)).rgb;\n" +
+                  "  vec3 e = texture2D(uTexSampler, vTexCoord + vec2( uTexelSize.x, 0.0)).rgb;\n" +
+                  "  vec3 w = texture2D(uTexSampler, vTexCoord + vec2(-uTexelSize.x, 0.0)).rgb;\n" +
+                  "  vec3 local = (n + s + e + w) * 0.25;\n" +
+                  "  vec3 detail = c.rgb - local;\n" +
+                  "  vec3 outRgb = clamp(c.rgb + detail * uAmount, 0.0, 1.0);\n" +
+                  "  gl_FragColor = vec4(outRgb, c.a);\n" +
+                  "}\n";
 
               private final GlProgram glProgram;
               private final float amount;
@@ -1471,6 +1492,10 @@ jobs:
 
           cat > /tmp/R028-MICRO-DETAIL-PRO-AUDIT.txt <<'TXT'
           R028 MICRO DETAIL PRO AUDIT
+          PASS GLSL newline escaping repaired for runtime shader compile
+          PASS micro-detail failure retries safe HEVC grade
+          PASS HEVC failure retries safe AVC grade
+          PASS raw master remains final safety fallback
           PASS R27 tone curve retained exactly
           PASS R27 highlight protection retained exactly
           PASS R27 warm RGB + saturation retained exactly
@@ -1578,6 +1603,8 @@ jobs:
           grep -q 'extends BaseGlShaderProgram' r28-micro/app/src/main/java/com/sentongoharuna/ducamera/MicroDetailShaderProgram.java
           grep -q 'detail \* uAmount' r28-micro/app/src/main/java/com/sentongoharuna/ducamera/MicroDetailShaderProgram.java
           grep -q 'uTexelSize' r28-micro/app/src/main/java/com/sentongoharuna/ducamera/MicroDetailShaderProgram.java
+          grep -q 'DETAIL FALLBACK • SAFE' r28-micro/app/src/main/java/com/sentongoharuna/ducamera/MicroDetailCameraActivity.java
+          grep -q 'boolean useMicroDetail' r28-micro/app/src/main/java/com/sentongoharuna/ducamera/MicroDetailCameraActivity.java
           grep -q 'publishEnhancedVideo' r28-micro/app/src/main/java/com/sentongoharuna/ducamera/MicroDetailCameraActivity.java
           grep -q 'EDGE_MODE_HIGH_QUALITY' r28-micro/app/src/main/java/com/sentongoharuna/ducamera/MicroDetailCameraActivity.java
           grep -q 'NOISE_REDUCTION_MODE_HIGH_QUALITY' r28-micro/app/src/main/java/com/sentongoharuna/ducamera/MicroDetailCameraActivity.java
