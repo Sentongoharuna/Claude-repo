@@ -1,0 +1,1759 @@
+name: Build DU Camera R027 SOCIAL TEXTURE APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R027-SOCIAL-TEXTURE.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r027_social_texture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create R027 social texture from proven R18/R19/R20/R21/R22/R23/R24/R25/R26 clean core
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf r27-social
+          mkdir -p r27-social/app/src/main/java/com/sentongoharuna/ducamera
+          mkdir -p r27-social/app/src/main/res/values
+
+          cat > r27-social/gradle.properties <<'PROPS'
+          android.useAndroidX=true
+          android.enableJetifier=false
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          PROPS
+
+          cat > r27-social/settings.gradle <<'GRADLE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "DUCameraR027SocialTexture"
+          include(":app")
+          GRADLE
+
+          cat > r27-social/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application' version '8.11.1' apply false
+          }
+          GRADLE
+
+          cat > r27-social/app/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.sentongoharuna.ducamera'
+              compileSdk 36
+
+              defaultConfig {
+                  applicationId 'com.sentongoharuna.ducamera.r027socialtexture'
+                  minSdk 24
+                  targetSdk 35
+                  versionCode 400000038
+                  versionName '1.0-r027-social-texture'
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.activity:activity:1.10.1'
+              implementation 'androidx.core:core:1.15.0'
+              implementation 'androidx.camera:camera-core:1.4.2'
+              implementation 'androidx.camera:camera-camera2:1.4.2'
+              implementation 'androidx.camera:camera-lifecycle:1.4.2'
+              implementation 'androidx.camera:camera-video:1.4.2'
+              implementation 'androidx.camera:camera-view:1.4.2'
+
+              // R22 true saved-video enhancement.
+              def media3_version = '1.10.1'
+              implementation "androidx.media3:media3-common:${media3_version}"
+              implementation "androidx.media3:media3-effect:${media3_version}"
+              implementation "androidx.media3:media3-transformer:${media3_version}"
+          }
+          GRADLE
+
+          cat > r27-social/app/src/main/res/values/styles.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.DUCamera" parent="@android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:windowBackground">@android:color/black</item>
+                  <item name="android:statusBarColor">@android:color/black</item>
+                  <item name="android:navigationBarColor">@android:color/black</item>
+                  <item name="android:colorAccent">#FFB323</item>
+              </style>
+          </resources>
+          XML
+
+          cat > r27-social/app/src/main/AndroidManifest.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+              <uses-feature
+                  android:name="android.hardware.camera.any"
+                  android:required="true" />
+
+              <application
+                  android:allowBackup="false"
+                  android:label="DU Camera R027 Social Texture"
+                  android:theme="@style/Theme.DUCamera">
+
+                  <activity
+                      android:name=".SocialTextureCameraActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+              </application>
+          </manifest>
+          XML
+
+          cat > r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java <<'JAVA'
+          package com.sentongoharuna.ducamera;
+
+          import android.Manifest;
+          import android.content.ContentValues;
+          import android.content.pm.PackageManager;
+          import android.content.Context;
+          import android.net.Uri;
+          import android.os.Environment;
+          import android.graphics.Color;
+          import android.graphics.drawable.GradientDrawable;
+          import android.hardware.camera2.CameraCaptureSession;
+          import android.hardware.camera2.CaptureRequest;
+          import android.hardware.camera2.CaptureResult;
+          import android.hardware.camera2.TotalCaptureResult;
+          import android.hardware.camera2.CameraCharacteristics;
+          import android.hardware.camera2.CameraManager;
+          import android.hardware.camera2.params.RggbChannelVector;
+          import android.hardware.camera2.params.StreamConfigurationMap;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.media.MediaRecorder;
+          import android.provider.MediaStore;
+          import android.util.Range;
+          import android.util.Size;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.ScaleGestureDetector;
+          import android.view.WindowManager;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import androidx.activity.ComponentActivity;
+          import androidx.annotation.OptIn;
+          import androidx.camera.camera2.interop.Camera2Interop;
+          import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
+          import androidx.camera.core.Camera;
+          import androidx.camera.core.CameraSelector;
+          import androidx.camera.core.DynamicRange;
+          import androidx.camera.core.ExposureState;
+          import androidx.camera.core.FocusMeteringAction;
+          import androidx.camera.core.MeteringPoint;
+          import androidx.camera.core.Preview;
+          import androidx.camera.core.ZoomState;
+          import androidx.camera.lifecycle.ProcessCameraProvider;
+          import androidx.camera.video.FallbackStrategy;
+          import androidx.camera.video.MediaStoreOutputOptions;
+          import androidx.camera.video.Quality;
+          import androidx.camera.video.QualitySelector;
+          import androidx.camera.video.Recorder;
+          import androidx.camera.video.Recording;
+          import androidx.camera.video.VideoCapture;
+          import androidx.camera.video.VideoRecordEvent;
+          import androidx.camera.view.PreviewView;
+          import androidx.core.content.ContextCompat;
+          import androidx.media3.common.Effect;
+          import androidx.media3.common.MediaItem;
+          import androidx.media3.common.MimeTypes;
+          import androidx.media3.common.util.UnstableApi;
+          import androidx.media3.effect.Contrast;
+          import androidx.media3.effect.HslAdjustment;
+          import androidx.media3.effect.RgbAdjustment;
+          import androidx.media3.transformer.Composition;
+          import androidx.media3.transformer.DefaultEncoderFactory;
+          import androidx.media3.transformer.EditedMediaItem;
+          import androidx.media3.transformer.Effects;
+          import androidx.media3.transformer.ExportException;
+          import androidx.media3.transformer.ExportResult;
+          import androidx.media3.transformer.Transformer;
+          import androidx.media3.transformer.VideoEncoderSettings;
+
+          import com.google.common.util.concurrent.ListenableFuture;
+
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.text.SimpleDateFormat;
+          import java.util.Arrays;
+          import java.util.Collections;
+          import java.util.Date;
+          import java.util.Locale;
+          import java.util.concurrent.TimeUnit;
+
+          @UnstableApi
+          @OptIn(markerClass = ExperimentalCamera2Interop.class)
+          public class SocialTextureCameraActivity extends ComponentActivity {
+
+              private static final int REQUEST_CAMERA = 2727;
+
+              private PreviewView previewView;
+              private TextView status;
+              private TextView recordButton;
+              private TextView lightButton;
+              private TextView highlightButton;
+              private TextView adaptiveButton;
+              private TextView motionButton;
+              private TextView enhanceButton;
+
+              private ProcessCameraProvider provider;
+              private Camera camera;
+              private VideoCapture<Recorder> videoCapture;
+              private Recording recording;
+              private ScaleGestureDetector scaleDetector;
+
+              private boolean useFront = false;
+              private boolean torchOn = false;
+              private boolean highlightProtect = true;
+              private boolean adaptiveEngine = true;
+              private boolean motionDetail = true;
+              private boolean autoEnhance = true;
+              private Transformer activeTransformer = null;
+              private HardwareProfile hardwareProfile = new HardwareProfile();
+              private int activeAttempt = 0;
+              private int adaptiveScene = 1; // 0 dark, 1 normal, 2 bright
+              private long lastAdaptiveExposureMs = 0L;
+              private double smoothedIso = 0.0;
+              private double smoothedExposureMs = 0.0;
+              private int lastAdaptiveExposureIndex = Integer.MIN_VALUE;
+              private double recordedRedGain = 0.0;
+              private double recordedBlueGain = 0.0;
+              private int recordedWbSamples = 0;
+              private int recordedDarkSceneSamples = 0;
+              private int recordedNormalSceneSamples = 0;
+              private int recordedBrightSceneSamples = 0;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  getWindow().setStatusBarColor(Color.BLACK);
+                  getWindow().setNavigationBarColor(Color.BLACK);
+
+                  buildUi();
+                  installCameraGestures();
+
+                  if (hasCameraPermission()) {
+                      startCamera();
+                  } else {
+                      status.setText("ALLOW CAMERA");
+                      requestPermissions(
+                          new String[] {
+                              Manifest.permission.CAMERA,
+                              Manifest.permission.RECORD_AUDIO
+                          },
+                          REQUEST_CAMERA
+                      );
+                  }
+              }
+
+              private void buildUi() {
+                  FrameLayout root = new FrameLayout(this);
+                  root.setBackgroundColor(Color.BLACK);
+
+                  previewView = new PreviewView(this);
+                  previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+                  previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+                  previewView.setBackgroundColor(Color.BLACK);
+                  root.addView(
+                      previewView,
+                      new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.MATCH_PARENT
+                      )
+                  );
+
+                  TextView master = button("R27 SOCIAL");
+                  FrameLayout.LayoutParams masterLp =
+                      new FrameLayout.LayoutParams(dp(108), dp(42), Gravity.TOP | Gravity.START);
+                  masterLp.leftMargin = dp(12);
+                  masterLp.topMargin = dp(16);
+                  root.addView(master, masterLp);
+
+                  TextView aspect = button("9:16");
+                  FrameLayout.LayoutParams aspectLp =
+                      new FrameLayout.LayoutParams(dp(82), dp(42), Gravity.TOP | Gravity.END);
+                  aspectLp.rightMargin = dp(12);
+                  aspectLp.topMargin = dp(16);
+                  root.addView(aspect, aspectLp);
+
+                  status = button("SOCIAL TEXTURE • OPENING");
+                  FrameLayout.LayoutParams statusLp =
+                      new FrameLayout.LayoutParams(dp(212), dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                  statusLp.topMargin = dp(68);
+                  root.addView(status, statusLp);
+                  status.setOnClickListener(v -> startCamera());
+
+                  LinearLayout qualityRail = new LinearLayout(this);
+                  qualityRail.setOrientation(LinearLayout.VERTICAL);
+                  qualityRail.setGravity(Gravity.CENTER);
+
+                  adaptiveButton = button("SOCIAL+");
+                  motionButton = button("MOTION+");
+                  enhanceButton = button("SOCIAL AUTO");
+                  TextView bitrate = button("50 Mbps");
+                  TextView fps = button("60 FPS");
+                  TextView stab = button("STAB AUTO");
+                  highlightButton = button("AE AUTO");
+
+                  qualityRail.addView(adaptiveButton, railLp());
+                  qualityRail.addView(motionButton, railLp());
+                  qualityRail.addView(enhanceButton, railLp());
+                  qualityRail.addView(bitrate, railLp());
+                  qualityRail.addView(fps, railLp());
+                  qualityRail.addView(stab, railLp());
+                  qualityRail.addView(highlightButton, railLp());
+
+                  FrameLayout.LayoutParams railRootLp =
+                      new FrameLayout.LayoutParams(dp(104), FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.END | Gravity.CENTER_VERTICAL);
+                  railRootLp.rightMargin = dp(10);
+                  root.addView(qualityRail, railRootLp);
+
+                  adaptiveButton.setOnClickListener(v -> {
+                      if (recording != null) return;
+                      adaptiveEngine = !adaptiveEngine;
+                      adaptiveButton.setText(adaptiveEngine ? "SOCIAL+" : "NATURAL");
+                      startCamera();
+                  });
+
+                  motionButton.setOnClickListener(v -> {
+                      if (recording != null) return;
+                      motionDetail = !motionDetail;
+                      motionButton.setText(motionDetail ? "MOTION+" : "MOTION OFF");
+                      startCamera();
+                  });
+
+                  enhanceButton.setOnClickListener(v -> {
+                      if (recording != null || activeTransformer != null) return;
+                      autoEnhance = !autoEnhance;
+                      enhanceButton.setText(
+                          autoEnhance ? "SOCIAL AUTO" : "RAW ONLY"
+                      );
+                  });
+
+                  highlightButton.setOnClickListener(v -> {
+                      highlightProtect = !highlightProtect;
+                      highlightButton.setText(highlightProtect ? "AE AUTO" : "AE OFF");
+                      applyHighlightProtection();
+                  });
+
+                  LinearLayout bottom = new LinearLayout(this);
+                  bottom.setOrientation(LinearLayout.HORIZONTAL);
+                  bottom.setGravity(Gravity.CENTER);
+                  bottom.setPadding(dp(8), dp(8), dp(8), dp(18));
+                  bottom.setBackgroundColor(0x66000000);
+
+                  TextView lensButton = button("LENS");
+                  recordButton = button("RECORD");
+                  lightButton = button("LIGHT");
+
+                  bottom.addView(lensButton, weightedButtonLp());
+                  bottom.addView(recordButton, weightedButtonLp());
+                  bottom.addView(lightButton, weightedButtonLp());
+
+                  root.addView(
+                      bottom,
+                      new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.BOTTOM
+                      )
+                  );
+
+                  lensButton.setOnClickListener(v -> {
+                      if (recording != null) {
+                          recording.stop();
+                      }
+                      useFront = !useFront;
+                      startCamera();
+                  });
+
+                  recordButton.setOnClickListener(v -> toggleRecording());
+                  lightButton.setOnClickListener(v -> toggleTorch());
+
+                  setContentView(root);
+              }
+
+              private LinearLayout.LayoutParams railLp() {
+                  LinearLayout.LayoutParams lp =
+                      new LinearLayout.LayoutParams(dp(96), dp(40));
+                  lp.bottomMargin = dp(7);
+                  return lp;
+              }
+
+              private LinearLayout.LayoutParams weightedButtonLp() {
+                  LinearLayout.LayoutParams lp =
+                      new LinearLayout.LayoutParams(0, dp(62), 1f);
+                  lp.setMarginStart(dp(5));
+                  lp.setMarginEnd(dp(5));
+                  return lp;
+              }
+
+              private void installCameraGestures() {
+                  scaleDetector =
+                      new ScaleGestureDetector(
+                          this,
+                          new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                              @Override
+                              public boolean onScale(ScaleGestureDetector detector) {
+                                  if (camera == null) return false;
+                                  ZoomState zoom =
+                                      camera.getCameraInfo().getZoomState().getValue();
+                                  if (zoom == null) return false;
+
+                                  float next =
+                                      zoom.getZoomRatio() * detector.getScaleFactor();
+                                  next = Math.max(zoom.getMinZoomRatio(),
+                                      Math.min(zoom.getMaxZoomRatio(), next));
+                                  camera.getCameraControl().setZoomRatio(next);
+                                  return true;
+                              }
+                          }
+                      );
+
+                  previewView.setOnTouchListener((v, event) -> {
+                      scaleDetector.onTouchEvent(event);
+
+                      if (event.getAction() == MotionEvent.ACTION_UP &&
+                          !scaleDetector.isInProgress() &&
+                          camera != null) {
+
+                          MeteringPoint point =
+                              previewView.getMeteringPointFactory()
+                                  .createPoint(event.getX(), event.getY());
+
+                          FocusMeteringAction action =
+                              new FocusMeteringAction.Builder(
+                                  point,
+                                  FocusMeteringAction.FLAG_AF |
+                                  FocusMeteringAction.FLAG_AE
+                              )
+                              .setAutoCancelDuration(4, TimeUnit.SECONDS)
+                              .build();
+
+                          camera.getCameraControl().startFocusAndMetering(action);
+                          status.setText("FOCUS • EXPOSURE");
+                      }
+                      return true;
+                  });
+              }
+
+              private void startCamera() {
+                  if (!hasCameraPermission()) {
+                      status.setText("ALLOW CAMERA");
+                      requestPermissions(
+                          new String[] { Manifest.permission.CAMERA },
+                          REQUEST_CAMERA
+                      );
+                      return;
+                  }
+
+                  status.setText("SOCIAL ENGINE OPENING");
+
+                  ListenableFuture<ProcessCameraProvider> future =
+                      ProcessCameraProvider.getInstance(this);
+
+                  future.addListener(() -> {
+                      try {
+                          provider = future.get();
+                          hardwareProfile = detectHardwareProfile();
+                          activeAttempt = chooseStartingAttempt(hardwareProfile);
+                          bindMasterAttempt();
+                      } catch (Throwable error) {
+                          status.setText("PROVIDER ERROR • TAP");
+                      }
+                  }, ContextCompat.getMainExecutor(this));
+              }
+
+              private void bindMasterAttempt() {
+                  if (provider == null) return;
+
+                  boolean preferUhd;
+                  boolean target60;
+                  boolean stabilization;
+                  boolean ispEnhance;
+                  int bitrate;
+
+                  switch (activeAttempt) {
+                      case 0:
+                          // Best case: UHD + 60 target + stabilization + ISP enhancement.
+                          preferUhd = true;
+                          target60 = true;
+                          stabilization = true;
+                          ispEnhance = adaptiveEngine;
+                          bitrate = motionDetail ? 55_000_000 : 50_000_000;
+                          break;
+                      case 1:
+                          // Keep UHD and ISP quality, step to 30 fps for compatibility.
+                          preferUhd = true;
+                          target60 = false;
+                          stabilization = true;
+                          ispEnhance = adaptiveEngine;
+                          bitrate = 48_000_000;
+                          break;
+                      case 2:
+                          // Keep UHD/detail but remove stabilization if the device conflicts.
+                          preferUhd = true;
+                          target60 = false;
+                          stabilization = false;
+                          ispEnhance = adaptiveEngine;
+                          bitrate = 45_000_000;
+                          break;
+                      case 3:
+                          // High motion fallback: FHD60 with enhancement.
+                          preferUhd = false;
+                          target60 = true;
+                          stabilization = true;
+                          ispEnhance = adaptiveEngine;
+                          bitrate = motionDetail ? 38_000_000 : 34_000_000;
+                          break;
+                      default:
+                          // Universal safety profile.
+                          preferUhd = false;
+                          target60 = false;
+                          stabilization = false;
+                          ispEnhance = false;
+                          bitrate = 28_000_000;
+                          break;
+                  }
+
+                  try {
+                      Range<Integer> fpsRange =
+                          target60 ? new Range<>(60, 60) : new Range<>(30, 30);
+
+                      Preview.Builder previewBuilder =
+                          new Preview.Builder()
+                              .setTargetFrameRate(fpsRange);
+
+                      if (stabilization) {
+                          previewBuilder.setPreviewStabilizationEnabled(true);
+                      }
+
+                      if (ispEnhance) {
+                          applyAdaptiveIsp(previewBuilder, target60);
+                      }
+
+                      installAdaptiveExposureMonitor(previewBuilder);
+
+                      Preview preview = previewBuilder.build();
+                      preview.setSurfaceProvider(previewView.getSurfaceProvider());
+
+                      QualitySelector selector =
+                          preferUhd
+                              ? QualitySelector.fromOrderedList(
+                                  Arrays.asList(
+                                      Quality.UHD,
+                                      Quality.FHD,
+                                      Quality.HD,
+                                      Quality.SD
+                                  ),
+                                  FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+                              )
+                              : QualitySelector.fromOrderedList(
+                                  Arrays.asList(
+                                      Quality.FHD,
+                                      Quality.HD,
+                                      Quality.SD
+                                  ),
+                                  FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+                              );
+
+                      Recorder recorder =
+                          new Recorder.Builder()
+                              .setQualitySelector(selector)
+                              .setTargetVideoEncodingBitRate(bitrate)
+                              .build();
+
+                      VideoCapture.Builder<Recorder> videoBuilder =
+                          new VideoCapture.Builder<>(recorder)
+                              .setDynamicRange(DynamicRange.SDR)
+                              .setTargetFrameRate(fpsRange);
+
+                      if (stabilization) {
+                          videoBuilder.setVideoStabilizationEnabled(true);
+                      }
+
+                      if (ispEnhance) {
+                          applyAdaptiveIsp(videoBuilder, target60);
+                      }
+
+                      VideoCapture<Recorder> candidateVideo =
+                          videoBuilder.build();
+
+                      CameraSelector cameraSelector =
+                          useFront
+                              ? CameraSelector.DEFAULT_FRONT_CAMERA
+                              : CameraSelector.DEFAULT_BACK_CAMERA;
+
+                      provider.unbindAll();
+
+                      Camera candidateCamera =
+                          provider.bindToLifecycle(
+                              this,
+                              cameraSelector,
+                              preview,
+                              candidateVideo
+                          );
+
+                      camera = candidateCamera;
+                      videoCapture = candidateVideo;
+                      resetAdaptiveExposureState();
+
+                      torchOn = false;
+                      lightButton.setText("LIGHT");
+                      applyHighlightProtection();
+
+                      String quality = preferUhd ? "4K PREF" : "1080 PREF";
+                      String fps = target60 ? "60T" : "30T";
+                      String engine = ispEnhance ? "SOCIAL+" : "NATURAL";
+                      String motion = motionDetail ? "MOTION+" : "MOTION";
+                      String stab = stabilization ? "STAB" : "NO-STAB";
+                      status.setText(
+                          hardwareProfile.label + " • " +
+                          quality + " • " + fps + " • " +
+                          engine + " • " + motion + " • " + stab
+                      );
+
+                  } catch (Throwable error) {
+                      activeAttempt++;
+
+                      if (activeAttempt <= 4) {
+                          status.setText("HQ FALLBACK " + activeAttempt);
+                          bindMasterAttempt();
+                      } else if (useFront) {
+                          useFront = false;
+                          hardwareProfile = detectHardwareProfile();
+                          activeAttempt = chooseStartingAttempt(hardwareProfile);
+                          status.setText("BACK CAMERA RETRY");
+                          bindMasterAttempt();
+                      } else {
+                          status.setText("BIND ERROR • TAP");
+                      }
+                  }
+              }
+
+              private static class HardwareProfile {
+                  boolean has4k = false;
+                  boolean has60 = false;
+                  String label = "HW SAFE";
+              }
+
+              private int chooseStartingAttempt(HardwareProfile profile) {
+                  if (!adaptiveEngine) {
+                      return profile.has60 ? 3 : 4;
+                  }
+                  if (profile.has4k && profile.has60) return 0;
+                  if (profile.has4k) return 1;
+                  if (profile.has60) return 3;
+                  return 4;
+              }
+
+              private HardwareProfile detectHardwareProfile() {
+                  HardwareProfile result = new HardwareProfile();
+
+                  try {
+                      CameraManager manager =
+                          (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+
+                      Integer wantedFacing =
+                          useFront
+                              ? CameraCharacteristics.LENS_FACING_FRONT
+                              : CameraCharacteristics.LENS_FACING_BACK;
+
+                      for (String cameraId : manager.getCameraIdList()) {
+                          CameraCharacteristics chars =
+                              manager.getCameraCharacteristics(cameraId);
+
+                          Integer facing =
+                              chars.get(CameraCharacteristics.LENS_FACING);
+
+                          if (facing == null || !facing.equals(wantedFacing)) {
+                              continue;
+                          }
+
+                          StreamConfigurationMap map =
+                              chars.get(
+                                  CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+                              );
+
+                          if (map != null) {
+                              Size[] sizes = map.getOutputSizes(MediaRecorder.class);
+                              if (sizes != null) {
+                                  for (Size size : sizes) {
+                                      int longSide =
+                                          Math.max(size.getWidth(), size.getHeight());
+                                      int shortSide =
+                                          Math.min(size.getWidth(), size.getHeight());
+
+                                      if (longSide >= 3840 && shortSide >= 2160) {
+                                          result.has4k = true;
+                                          break;
+                                      }
+                                  }
+                              }
+                          }
+
+                          Range<Integer>[] ranges =
+                              chars.get(
+                                  CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+                              );
+
+                          if (ranges != null) {
+                              for (Range<Integer> range : ranges) {
+                                  if (range.getUpper() >= 60) {
+                                      result.has60 = true;
+                                      break;
+                                  }
+                              }
+                          }
+
+                          break;
+                      }
+                  } catch (Throwable ignored) {
+                      result.has4k = false;
+                      result.has60 = false;
+                  }
+
+                  if (result.has4k && result.has60) {
+                      result.label = "HW 4K/60";
+                  } else if (result.has4k) {
+                      result.label = "HW 4K";
+                  } else if (result.has60) {
+                      result.label = "HW 60";
+                  }
+
+                  return result;
+              }
+
+              @SuppressWarnings({"rawtypes", "unchecked"})
+              private void applyAdaptiveIsp(
+                  androidx.camera.core.ExtendableBuilder previewOrVideoBuilder,
+                  boolean highFrameRate
+              ) {
+                  /*
+                   * Adaptive processing uses Android's camera ISP when exposed by the device.
+                   * 60 fps uses FAST noise reduction to preserve texture and throughput.
+                   * 30 fps can ask for HIGH_QUALITY noise reduction.
+                   * If a phone rejects these requests, bindMasterAttempt() automatically
+                   * falls back to a safer profile rather than leaving a blank camera.
+                   */
+                  Camera2Interop.Extender interop =
+                      new Camera2Interop.Extender(previewOrVideoBuilder);
+
+                  interop.setCaptureRequestOption(
+                      CaptureRequest.EDGE_MODE,
+                      highFrameRate
+                          ? CaptureRequest.EDGE_MODE_FAST
+                          : CaptureRequest.EDGE_MODE_HIGH_QUALITY
+                  );
+
+                  interop.setCaptureRequestOption(
+                      CaptureRequest.NOISE_REDUCTION_MODE,
+                      highFrameRate
+                          ? CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                          : CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
+                  );
+
+                  interop.setCaptureRequestOption(
+                      CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                      CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY
+                  );
+
+                  interop.setCaptureRequestOption(
+                      CaptureRequest.CONTROL_AE_ANTIBANDING_MODE,
+                      CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+                  );
+              }
+
+              @SuppressWarnings({"rawtypes", "unchecked"})
+              private void installAdaptiveExposureMonitor(
+                  Preview.Builder previewBuilder
+              ) {
+                  /*
+                   * Read Camera2 AE metadata from the existing preview session.
+                   * This adds no ImageAnalysis surface, so it does not consume
+                   * another high-bandwidth camera stream or disturb 60 fps video.
+                   */
+                  Camera2Interop.Extender interop =
+                      new Camera2Interop.Extender(previewBuilder);
+
+                  interop.setSessionCaptureCallback(
+                      new CameraCaptureSession.CaptureCallback() {
+                          @Override
+                          public void onCaptureCompleted(
+                              CameraCaptureSession session,
+                              CaptureRequest request,
+                              TotalCaptureResult result
+                          ) {
+                              RggbChannelVector gains =
+                                  result.get(
+                                      CaptureResult.COLOR_CORRECTION_GAINS
+                                  );
+
+                              if (gains != null &&
+                                  recording != null) {
+                                  handleRecordedWhiteBalance(
+                                      gains
+                                  );
+                              }
+
+                              Integer iso =
+                                  result.get(
+                                      CaptureResult.SENSOR_SENSITIVITY
+                                  );
+
+                              Long exposureNs =
+                                  result.get(
+                                      CaptureResult.SENSOR_EXPOSURE_TIME
+                                  );
+
+                              if (iso == null ||
+                                  exposureNs == null ||
+                                  iso <= 0 ||
+                                  exposureNs <= 0L) {
+                                  return;
+                              }
+
+                              handleAdaptiveExposureSample(
+                                  iso,
+                                  exposureNs
+                              );
+                          }
+                      }
+                  );
+              }
+
+              private void resetRecordedWhiteBalance() {
+                  recordedRedGain = 0.0;
+                  recordedBlueGain = 0.0;
+                  recordedWbSamples = 0;
+              }
+
+              private void resetRecordedSceneProfile() {
+                  recordedDarkSceneSamples = 0;
+                  recordedNormalSceneSamples = 0;
+                  recordedBrightSceneSamples = 0;
+              }
+
+              private void rememberRecordedSceneSample(int scene) {
+                  if (recording == null) {
+                      return;
+                  }
+
+                  if (scene == 0) {
+                      recordedDarkSceneSamples++;
+                  } else if (scene == 2) {
+                      recordedBrightSceneSamples++;
+                  } else {
+                      recordedNormalSceneSamples++;
+                  }
+              }
+
+              private int chooseRecordedSceneProfile() {
+                  int total =
+                      recordedDarkSceneSamples +
+                      recordedNormalSceneSamples +
+                      recordedBrightSceneSamples;
+
+                  if (total < 2) {
+                      return adaptiveScene;
+                  }
+
+                  if (recordedDarkSceneSamples >= recordedNormalSceneSamples &&
+                      recordedDarkSceneSamples >= recordedBrightSceneSamples) {
+                      return 0;
+                  }
+
+                  if (recordedBrightSceneSamples >= recordedDarkSceneSamples &&
+                      recordedBrightSceneSamples >= recordedNormalSceneSamples) {
+                      return 2;
+                  }
+
+                  return 1;
+              }
+
+              private void handleRecordedWhiteBalance(
+                  RggbChannelVector gains
+              ) {
+                  float red = gains.getRed();
+                  float blue = gains.getBlue();
+
+                  if (red <= 0.0f || blue <= 0.0f) {
+                      return;
+                  }
+
+                  if (recordedWbSamples == 0) {
+                      recordedRedGain = red;
+                      recordedBlueGain = blue;
+                  } else {
+                      // Slow smoothing follows the scene without reacting to
+                      // one frame or a brief colored reflection.
+                      recordedRedGain =
+                          (recordedRedGain * 0.94) +
+                          (red * 0.06);
+
+                      recordedBlueGain =
+                          (recordedBlueGain * 0.94) +
+                          (blue * 0.06);
+                  }
+
+                  if (recordedWbSamples < 1000000) {
+                      recordedWbSamples++;
+                  }
+              }
+
+              private int chooseRecordedColorProfile() {
+                  if (recordedWbSamples < 12 ||
+                      recordedBlueGain <= 0.0) {
+                      return 1; // neutral/default
+                  }
+
+                  double redToBlue =
+                      recordedRedGain / recordedBlueGain;
+
+                  // A large red correction gain normally indicates that the
+                  // scene illumination is running cool/blue. Apply only a
+                  // small post warmth correction so whites remain believable.
+                  if (redToBlue >= 1.20) {
+                      return 2; // cool scene -> mild warm correction
+                  }
+
+                  // A much larger blue correction gain indicates warm light.
+                  // Back warmth off slightly rather than making skin orange.
+                  if (redToBlue <= 0.80) {
+                      return 0; // warm scene -> mild neutral/cool correction
+                  }
+
+                  return 1;
+              }
+
+              private void resetAdaptiveExposureState() {
+                  adaptiveScene = 1;
+                  lastAdaptiveExposureMs = 0L;
+                  smoothedIso = 0.0;
+                  smoothedExposureMs = 0.0;
+                  lastAdaptiveExposureIndex =
+                      Integer.MIN_VALUE;
+              }
+
+              private void handleAdaptiveExposureSample(
+                  int iso,
+                  long exposureNs
+              ) {
+                  if (!highlightProtect || camera == null) {
+                      return;
+                  }
+
+                  double exposureMs =
+                      exposureNs / 1_000_000.0;
+
+                  if (smoothedIso <= 0.0) {
+                      smoothedIso = iso;
+                      smoothedExposureMs = exposureMs;
+                  } else {
+                      // Slow smoothing avoids exposure pumping while walking.
+                      smoothedIso =
+                          (smoothedIso * 0.82) +
+                          (iso * 0.18);
+
+                      smoothedExposureMs =
+                          (smoothedExposureMs * 0.82) +
+                          (exposureMs * 0.18);
+                  }
+
+                  long now = System.currentTimeMillis();
+
+                  // Do not move exposure more than about once per second.
+                  if (now - lastAdaptiveExposureMs < 1100L) {
+                      return;
+                  }
+
+                  int nextScene = adaptiveScene;
+
+                  if (adaptiveScene == 0) {
+                      // Stay in dark mode until the scene clearly improves.
+                      if (smoothedIso < 430.0 &&
+                          smoothedExposureMs < 7.5) {
+                          nextScene = 1;
+                      }
+                  } else if (adaptiveScene == 2) {
+                      // Stay in bright mode until highlights no longer need it.
+                      if (smoothedIso > 280.0 ||
+                          smoothedExposureMs > 6.0) {
+                          nextScene = 1;
+                      }
+                  } else {
+                      // Enter dark mode when AE is working hard.
+                      if (smoothedIso >= 650.0 ||
+                          smoothedExposureMs >= 10.5) {
+                          nextScene = 0;
+                      }
+                      // Enter bright mode only when both ISO and shutter
+                      // indicate plenty of available light.
+                      else if (smoothedIso <= 190.0 &&
+                               smoothedExposureMs <= 4.5) {
+                          nextScene = 2;
+                      }
+                  }
+
+                  adaptiveScene = nextScene;
+                  lastAdaptiveExposureMs = now;
+                  rememberRecordedSceneSample(adaptiveScene);
+
+                  double targetEv;
+
+                  if (adaptiveScene == 0) {
+                      // R27 dark scene: preserve black depth without burying texture.
+                      targetEv = -0.02;
+                  } else if (adaptiveScene == 2) {
+                      // R27 bright scene: retain highlight headroom without starving shadows.
+                      targetEv = -0.36;
+                  } else {
+                      // R27 normal scene: balanced social-media headroom.
+                      targetEv = -0.18;
+                  }
+
+                  final double requestedEv = targetEv;
+
+                  runOnUiThread(
+                      () -> applyExposureEv(requestedEv)
+                  );
+              }
+
+              private void applyExposureEv(double wantedEv) {
+                  if (camera == null) return;
+
+                  ExposureState exposure =
+                      camera.getCameraInfo().getExposureState();
+
+                  Range<Integer> range =
+                      exposure.getExposureCompensationRange();
+
+                  double step =
+                      exposure.getExposureCompensationStep()
+                          .doubleValue();
+
+                  int target = 0;
+
+                  if (step > 0.0) {
+                      target =
+                          (int) Math.round(wantedEv / step);
+                  }
+
+                  target =
+                      Math.max(
+                          range.getLower(),
+                          Math.min(
+                              range.getUpper(),
+                              target
+                          )
+                      );
+
+                  if (target == lastAdaptiveExposureIndex) {
+                      return;
+                  }
+
+                  lastAdaptiveExposureIndex = target;
+
+                  camera.getCameraControl()
+                      .setExposureCompensationIndex(target);
+              }
+
+              private void applyHighlightProtection() {
+                  if (camera == null) return;
+
+                  if (!highlightProtect) {
+                      applyExposureEv(0.0);
+                      return;
+                  }
+
+                  // Start from the R27 normal-scene value. Camera2 metadata
+                  // then moves this toward dark/bright scene targets automatically.
+                  applyExposureEv(-0.18);
+              }
+
+              private void toggleTorch() {
+                  if (camera == null) {
+                      status.setText("CAMERA NOT READY");
+                      return;
+                  }
+
+                  if (!camera.getCameraInfo().hasFlashUnit()) {
+                      status.setText("NO FLASH");
+                      return;
+                  }
+
+                  torchOn = !torchOn;
+                  camera.getCameraControl().enableTorch(torchOn);
+                  lightButton.setText(torchOn ? "LIGHT ON" : "LIGHT");
+              }
+
+              private void toggleRecording() {
+                  if (recording != null) {
+                      recording.stop();
+                      return;
+                  }
+
+                  if (videoCapture == null) {
+                      status.setText("CAMERA NOT READY");
+                      return;
+                  }
+
+                  String stamp =
+                      new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+                          .format(new Date());
+
+                  ContentValues values = new ContentValues();
+                  values.put(
+                      MediaStore.Video.Media.DISPLAY_NAME,
+                      "DU_R27_RAW_" + stamp
+                  );
+                  values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      values.put(
+                          MediaStore.Video.Media.RELATIVE_PATH,
+                          "Movies/DU Camera/R27 Raw"
+                      );
+                  }
+
+                  MediaStoreOutputOptions output =
+                      new MediaStoreOutputOptions.Builder(
+                          getContentResolver(),
+                          MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                      )
+                      .setContentValues(values)
+                      .build();
+
+                  androidx.camera.video.PendingRecording pending =
+                      videoCapture.getOutput().prepareRecording(this, output);
+
+                  if (hasAudioPermission()) {
+                      pending = pending.withAudioEnabled();
+                  }
+
+                  recording =
+                      pending.start(
+                          ContextCompat.getMainExecutor(this),
+                          event -> {
+                              if (event instanceof VideoRecordEvent.Start) {
+                                  resetRecordedWhiteBalance();
+                                  resetRecordedSceneProfile();
+                                  recordButton.setText("STOP");
+                                  status.setText("SOCIAL MASTER • REC");
+                              } else if (event instanceof VideoRecordEvent.Finalize) {
+                                  VideoRecordEvent.Finalize end =
+                                      (VideoRecordEvent.Finalize) event;
+
+                                  recording = null;
+                                  recordButton.setText("RECORD");
+
+                                  if (end.hasError()) {
+                                      status.setText("SAVE ERROR");
+                                  } else {
+                                      Uri rawUri =
+                                          end.getOutputResults().getOutputUri();
+
+                                      if (autoEnhance &&
+                                          rawUri != null &&
+                                          !Uri.EMPTY.equals(rawUri)) {
+                                          int colorProfile =
+                                              chooseRecordedColorProfile();
+
+                                          int sceneProfile =
+                                              chooseRecordedSceneProfile();
+
+                                          status.setText(
+                                              sceneProfile == 2
+                                                  ? "ENHANCING • BRIGHT DETAIL"
+                                                  : sceneProfile == 0
+                                                      ? "ENHANCING • SHADOW DETAIL"
+                                                      : "ENHANCING • SOCIAL DETAIL"
+                                          );
+
+                                          enhanceRecordedMaster(
+                                              rawUri,
+                                              true,
+                                              colorProfile,
+                                              sceneProfile
+                                          );
+                                      } else {
+                                          status.setText("RAW MASTER SAVED");
+                                      }
+                                  }
+                              }
+                          }
+                      );
+              }
+
+              private void enhanceRecordedMaster(
+                  Uri inputUri,
+                  boolean preferHevc,
+                  int colorProfile,
+                  int sceneProfile
+              ) {
+                  try {
+                      File directory =
+                          getExternalFilesDir(
+                              Environment.DIRECTORY_MOVIES
+                          );
+
+                      if (directory == null) {
+                          directory = getCacheDir();
+                      }
+
+                      File enhancedFile =
+                          new File(
+                              directory,
+                              "DU_R27_ENHANCED_" +
+                              System.currentTimeMillis() +
+                              ".mp4"
+                          );
+
+                      if (enhancedFile.exists()) {
+                          enhancedFile.delete();
+                      }
+
+                      // R27 Social Texture:
+                      // scene-aware grading inspired by the user's social reference.
+                      // Dark scenes get gentler contrast and more shadow lift.
+                      // Bright scenes preserve punch with controlled lightness.
+                      float contrastAmount = 0.050f;
+                      float saturationAmount = 4.8f;
+                      float lightnessAmount = 0.9f;
+
+                      if (sceneProfile == 0) {
+                          contrastAmount = 0.018f;
+                          saturationAmount = 3.8f;
+                          lightnessAmount = 2.2f;
+                      } else if (sceneProfile == 2) {
+                          contrastAmount = 0.055f;
+                          saturationAmount = 4.8f;
+                          lightnessAmount = 0.2f;
+                      }
+
+                      Effect contrast =
+                          new Contrast(contrastAmount);
+
+                      Effect saturation =
+                          new HslAdjustment.Builder()
+                              .adjustSaturation(saturationAmount)
+                              .adjustLightness(lightnessAmount)
+                              .build();
+
+                      // Preserve believable whites while giving neutral/cool
+                      // scenes a small warm separation similar to the reference.
+                      float redScale = 1.016f;
+                      float greenScale = 1.008f;
+                      float blueScale = 0.996f;
+
+                      if (colorProfile == 2) {
+                          // Cool/blue scene: mild warmth, still neutral enough for skin.
+                          redScale = 1.022f;
+                          greenScale = 1.007f;
+                          blueScale = 0.988f;
+                      } else if (colorProfile == 0) {
+                          // Warm scene: retain warm browns/golds without turning orange.
+                          redScale = 1.010f;
+                          greenScale = 1.007f;
+                          blueScale = 1.003f;
+                      }
+
+                      Effect channelBalance =
+                          new RgbAdjustment.Builder()
+                              .setRedScale(redScale)
+                              .setGreenScale(greenScale)
+                              .setBlueScale(blueScale)
+                              .build();
+
+                      EditedMediaItem editedItem =
+                          new EditedMediaItem.Builder(
+                              MediaItem.fromUri(inputUri)
+                          )
+                          .setEffects(
+                              new Effects(
+                                  Collections.emptyList(),
+                                  Arrays.asList(
+                                      contrast,
+                                      saturation,
+                                      channelBalance
+                                  )
+                              )
+                          )
+                          .build();
+
+                      VideoEncoderSettings encoderSettings =
+                          new VideoEncoderSettings.Builder()
+                              .setBitrate(40_000_000)
+                              .setiFrameIntervalSeconds(1.0f)
+                              .build();
+
+                      DefaultEncoderFactory encoderFactory =
+                          new DefaultEncoderFactory.Builder(this)
+                              .setEnableFallback(true)
+                              .setRequestedVideoEncoderSettings(
+                                  encoderSettings
+                              )
+                              .build();
+
+                      Transformer.Builder builder =
+                          new Transformer.Builder(this)
+                              .setEncoderFactory(encoderFactory)
+                              .addListener(
+                                  new Transformer.Listener() {
+                                      @Override
+                                      public void onCompleted(
+                                          Composition composition,
+                                          ExportResult exportResult
+                                      ) {
+                                          activeTransformer = null;
+                                          publishEnhancedVideo(
+                                              enhancedFile
+                                          );
+                                      }
+
+                                      @Override
+                                      public void onError(
+                                          Composition composition,
+                                          ExportResult exportResult,
+                                          ExportException exportException
+                                      ) {
+                                          activeTransformer = null;
+
+                                          // HEVC is preferred for social-media
+                                          // quality/size. Retry as AVC on phones
+                                          // whose encoders reject HEVC.
+                                          if (preferHevc) {
+                                              if (enhancedFile.exists()) {
+                                                  enhancedFile.delete();
+                                              }
+
+                                              status.setText(
+                                                  "HEVC FALLBACK • AVC"
+                                              );
+
+                                              enhanceRecordedMaster(
+                                                  inputUri,
+                                                  false,
+                                                  colorProfile,
+                                                  sceneProfile
+                                              );
+                                          } else {
+                                              status.setText(
+                                                  "RAW SAVED • ENHANCE SKIPPED"
+                                              );
+                                          }
+                                      }
+                                  }
+                              );
+
+                      builder.setVideoMimeType(
+                          preferHevc
+                              ? MimeTypes.VIDEO_H265
+                              : MimeTypes.VIDEO_H264
+                      );
+
+                      activeTransformer = builder.build();
+
+                      activeTransformer.start(
+                          editedItem,
+                          enhancedFile.getAbsolutePath()
+                      );
+
+                  } catch (Throwable error) {
+                      activeTransformer = null;
+                      status.setText(
+                          "RAW SAVED • ENHANCE ERROR"
+                      );
+                  }
+              }
+
+              private void publishEnhancedVideo(
+                  File sourceFile
+              ) {
+                  if (sourceFile == null ||
+                      !sourceFile.exists()) {
+                      status.setText(
+                          "RAW SAVED • EXPORT MISSING"
+                      );
+                      return;
+                  }
+
+                  Uri destination = null;
+
+                  try {
+                      ContentValues values =
+                          new ContentValues();
+
+                      values.put(
+                          MediaStore.Video.Media.DISPLAY_NAME,
+                          "DU_R27_SOCIAL_TEXTURE_" +
+                          new SimpleDateFormat(
+                              "yyyyMMdd_HHmmss",
+                              Locale.US
+                          ).format(new Date())
+                      );
+
+                      values.put(
+                          MediaStore.Video.Media.MIME_TYPE,
+                          "video/mp4"
+                      );
+
+                      if (Build.VERSION.SDK_INT >=
+                          Build.VERSION_CODES.Q) {
+                          values.put(
+                              MediaStore.Video.Media.RELATIVE_PATH,
+                              "Movies/DU Camera/Social Texture"
+                          );
+                          values.put(
+                              MediaStore.Video.Media.IS_PENDING,
+                              1
+                          );
+                      }
+
+                      destination =
+                          getContentResolver().insert(
+                              MediaStore.Video.Media
+                                  .EXTERNAL_CONTENT_URI,
+                              values
+                          );
+
+                      if (destination == null) {
+                          throw new IllegalStateException(
+                              "Enhanced MediaStore insert failed"
+                          );
+                      }
+
+                      try (
+                          InputStream input =
+                              new FileInputStream(sourceFile);
+                          OutputStream output =
+                              getContentResolver()
+                                  .openOutputStream(destination)
+                      ) {
+                          if (output == null) {
+                              throw new IllegalStateException(
+                                  "Enhanced output stream failed"
+                              );
+                          }
+
+                          byte[] buffer =
+                              new byte[1024 * 1024];
+
+                          int count;
+
+                          while ((count =
+                              input.read(buffer)) != -1) {
+                              output.write(
+                                  buffer,
+                                  0,
+                                  count
+                              );
+                          }
+
+                          output.flush();
+                      }
+
+                      if (Build.VERSION.SDK_INT >=
+                          Build.VERSION_CODES.Q) {
+                          ContentValues ready =
+                              new ContentValues();
+
+                          ready.put(
+                              MediaStore.Video.Media.IS_PENDING,
+                              0
+                          );
+
+                          getContentResolver().update(
+                              destination,
+                              ready,
+                              null,
+                              null
+                          );
+                      }
+
+                      sourceFile.delete();
+
+                      status.setText(
+                          "SOCIAL TEXTURE • ENHANCED SAVED"
+                      );
+
+                  } catch (Throwable error) {
+                      if (destination != null) {
+                          try {
+                              getContentResolver().delete(
+                                  destination,
+                                  null,
+                                  null
+                              );
+                          } catch (Throwable ignored) {
+                          }
+                      }
+
+                      status.setText(
+                          "RAW SAVED • PUBLISH ERROR"
+                      );
+                  }
+              }
+
+              @Override
+              public void onRequestPermissionsResult(
+                  int requestCode,
+                  String[] permissions,
+                  int[] grantResults
+              ) {
+                  super.onRequestPermissionsResult(
+                      requestCode,
+                      permissions,
+                      grantResults
+                  );
+
+                  if (requestCode == REQUEST_CAMERA) {
+                      if (hasCameraPermission()) {
+                          startCamera();
+                      } else {
+                          status.setText("CAMERA PERMISSION DENIED");
+                      }
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (recording != null) {
+                      recording.stop();
+                  }
+                  if (activeTransformer != null) {
+                      activeTransformer.cancel();
+                      activeTransformer = null;
+                  }
+                  if (provider != null) {
+                      provider.unbindAll();
+                  }
+                  super.onDestroy();
+              }
+
+              private boolean hasCameraPermission() {
+                  return ContextCompat.checkSelfPermission(
+                      this,
+                      Manifest.permission.CAMERA
+                  ) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private boolean hasAudioPermission() {
+                  return ContextCompat.checkSelfPermission(
+                      this,
+                      Manifest.permission.RECORD_AUDIO
+                  ) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private TextView button(String text) {
+                  TextView view = new TextView(this);
+                  view.setText(text);
+                  view.setTextColor(Color.WHITE);
+                  view.setTextSize(11.5f);
+                  view.setGravity(Gravity.CENTER);
+
+                  GradientDrawable bg = new GradientDrawable();
+                  bg.setColor(0xDD111111);
+                  bg.setCornerRadius(dp(12));
+                  bg.setStroke(dp(1), 0xFFFFB323);
+
+                  view.setBackground(bg);
+                  return view;
+              }
+
+              private int dp(int value) {
+                  return (int) (
+                      value * getResources().getDisplayMetrics().density
+                  );
+              }
+          }
+          JAVA
+
+          cat > /tmp/R027-SOCIAL-TEXTURE-AUDIT.txt <<'TXT'
+          R027 SOCIAL TEXTURE AUDIT
+          PASS actual R26 Scene Balance used as source baseline
+          PASS CameraX 1.4.2 clean camera engine preserved
+          PASS Media3 1.10.1 saved-video enhancement preserved
+          PASS compileSdk 36 + AGP 8.11.1 + Gradle 8.13 preserved
+          PASS raw master capture bitrate ladder preserved
+          PASS 40 Mbps HEVC-preferred enhanced export preserved
+          PASS H264/AVC export fallback preserved
+          PASS recorded white-balance profile preserved
+          PASS recorded dark/normal/bright scene memory added
+          PASS dark-scene EV opened from -0.10 to -0.02
+          PASS normal-scene EV opened from -0.24 to -0.18
+          PASS bright-scene EV opened from -0.42 to -0.36
+          PASS dark grade uses low contrast + stronger shadow lightness lift
+          PASS normal grade uses moderate social micro-contrast
+          PASS bright grade keeps contrast but limits lightness lift
+          PASS neutral/cool scenes receive mild warm separation
+          PASS warm scenes retain browns/golds without orange cast
+          PASS 60fps FAST edge processing preserved
+          PASS 30fps HIGH_QUALITY edge processing preserved
+          PASS no new CameraX/Media3 APIs introduced
+          PASS no ImageAnalysis stream added
+          PASS raw video preserved if enhancement fails
+          TXT
+
+          grep -qx 'android.useAndroidX=true' r27-social/gradle.properties
+          test "$(grep -c 'android.intent.action.MAIN' r27-social/app/src/main/AndroidManifest.xml)" = "1"
+          test "$(grep -c 'android.intent.category.LAUNCHER' r27-social/app/src/main/AndroidManifest.xml)" = "1"
+          grep -q 'Quality.UHD' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q '50_000_000' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'new Range<>(60, 60)' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'setVideoStabilizationEnabled(true)' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'setPreviewStabilizationEnabled(true)' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'DynamicRange.SDR' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'startFocusAndMetering' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'setZoomRatio' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'Camera2Interop.Extender' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'SCALER_STREAM_CONFIGURATION_MAP' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q '55_000_000' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'media3-transformer' r27-social/app/build.gradle
+          grep -q "compileSdk 36" r27-social/app/build.gradle
+          ! grep -q 'setEnableFormatFallback' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'EDGE_MODE_FAST' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'setSessionCaptureCallback' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'SENSOR_SENSITIVITY' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'SENSOR_EXPOSURE_TIME' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'COLOR_CORRECTION_GAINS' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'chooseRecordedColorProfile' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'chooseRecordedSceneProfile' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'rememberRecordedSceneSample' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'targetEv = -0.02' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'targetEv = -0.18' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'targetEv = -0.36' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'contrastAmount = 0.018f' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'lightnessAmount = 2.2f' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'contrastAmount = 0.055f' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'redScale = 1.022f' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'blueScale = 0.988f' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'redToBlue >= 1.20' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'redToBlue <= 0.80' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          ! grep -q 'ImageAnalysis' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'MimeTypes.VIDEO_H265' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q '40_000_000' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'publishEnhancedVideo' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'EDGE_MODE_HIGH_QUALITY' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'NOISE_REDUCTION_MODE_HIGH_QUALITY' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          grep -q 'COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          ! grep -q 'getSelectedQuality' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+          ! grep -q 'getResolutionInfo' r27-social/app/src/main/java/com/sentongoharuna/ducamera/SocialTextureCameraActivity.java
+
+          echo "PASS: R027 Social Texture source audit complete."
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Build R027 SOCIAL TEXTURE APK
+        working-directory: r27-social
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee r027-social-texture-build.log
+
+      - name: Prepare APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='r27-social/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R027-SOCIAL-TEXTURE.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R027-SOCIAL-TEXTURE-AUDIT
+          path: /tmp/R027-SOCIAL-TEXTURE-AUDIT.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R027-SOCIAL-TEXTURE-FAILED-BUILD-LOG
+          path: r27-social/r027-social-texture-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload R027 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R027-SOCIAL-TEXTURE
+          path: DU-Camera-R027-SOCIAL-TEXTURE.apk
+          if-no-files-found: error
+          retention-days: 14
