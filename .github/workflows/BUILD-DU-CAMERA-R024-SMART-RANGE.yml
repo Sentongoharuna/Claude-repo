@@ -1328,6 +1328,11 @@ jobs:
 
           cat > /tmp/R024-SMART-RANGE-AUDIT.txt <<'TXT'
           R024 SMART RANGE AUDIT
+          PASS dynamic normal/torch contrast profile
+          PASS dynamic normal/torch saturation profile
+          PASS torch shadow lift +3.0 / normal +2.0
+          PASS torch highlight protection -0.55 EV
+          PASS 40 Mbps enhanced export target
           PASS proven R23 CameraX + Media3 core retained
           PASS torch-aware exposure protection
           PASS immediate exposure rebalance when LIGHT toggles
@@ -1336,10 +1341,6 @@ jobs:
           PASS torch grade lifts shadow lightness more strongly
           PASS normal grade remains natural and restrained
           PASS HEVC preferred / AVC fallback retained
-          PASS gentler recorded contrast
-          PASS reduced global saturation
-          PASS +1.5 lightness for cleaner shadow detail
-          PASS warm RGB balance without heavy cast
           PASS softer FAST edge processing at 60fps
           PASS HIGH_QUALITY edge processing retained at 30fps
           PASS balanced highlight protection
@@ -1350,7 +1351,6 @@ jobs:
           PASS true Media3 recorded-file enhancement
           PASS contrast + saturation + RGB channel grade
           PASS HEVC preferred with AVC retry
-          PASS 42 Mbps enhanced export target
           PASS raw recording preserved if enhancement fails
           PASS R20 Camera2 ISP helper retained unchanged
           PASS stable platform-only 4K/60 capability detection
@@ -1370,7 +1370,6 @@ jobs:
           PASS 50 Mbps UHD target bitrate
           PASS SDR / BT.709-friendly capture path
           PASS stabilization with safe fallback
-          PASS highlight protection -0.3 EV
           PASS tap focus/exposure
           PASS pinch zoom
           PASS MediaStore TikTok Master save path
@@ -1398,9 +1397,11 @@ jobs:
           grep -q 'recordingTorchProfile = torchOn' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
           grep -q 'torchProfile ? 0.015f : 0.055f' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
           grep -q 'torchProfile ? 3.0f : 2.0f' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
+          grep -q 'torchProfile ? 4.0f : 5.0f' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
+          grep -q 'torchProfile ? 1.025f : 1.015f' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
+          grep -q 'torchProfile ? 0.990f : 0.997f' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
           grep -q 'wantedEv = -0.55' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
           grep -q 'applyHighlightProtection();' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
-          grep -q 'adjustSaturation(5.5f)' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
           grep -q 'MimeTypes.VIDEO_H265' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
           grep -q '40_000_000' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
           grep -q 'publishEnhancedVideo' r24-range/app/src/main/java/com/sentongoharuna/ducamera/SmartRangeCameraActivity.java
