@@ -1390,9 +1390,9 @@ jobs:
           PASS one PreviewView
           PASS UHD preferred with FHD fallback
           PASS adaptive Camera2 ISP enhancement
-          PASS high-quality edge processing
+          PASS adaptive edge processing: FAST 60fps / HIGH_QUALITY 30fps
           PASS texture-preserving 60fps noise processing
-          PASS high-quality 30fps noise processing
+          PASS texture-preserving FAST 30fps noise processing
           PASS chromatic aberration correction
           PASS anti-banding AUTO
           PASS hardware-profile reporting without unsupported CameraX APIs
@@ -1439,12 +1439,11 @@ jobs:
           grep -q 'minimalIspRetryUsed' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
           ! grep -R -q 'MicroDetailEffect' r29-capture/app/src/main/java
           ! grep -R -q 'BaseGlShaderProgram' r29-capture/app/src/main/java
-          ! grep -R -q 'MicroDetailEffect' r29-capture/app/src/main/java
-          ! grep -R -q 'BaseGlShaderProgram' r29-capture/app/src/main/java
           ! grep -R -q 'GlProgram' r29-capture/app/src/main/java
           grep -q 'publishEnhancedVideo' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
           grep -q 'EDGE_MODE_HIGH_QUALITY' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
-          grep -q 'NOISE_REDUCTION_MODE_HIGH_QUALITY' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
+          grep -q 'NOISE_REDUCTION_MODE_FAST' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
+          ! grep -q 'NOISE_REDUCTION_MODE_HIGH_QUALITY' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
           grep -q 'COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
           ! grep -q 'getSelectedQuality' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
           ! grep -q 'getResolutionInfo' r29-capture/app/src/main/java/com/sentongoharuna/ducamera/CaptureDetailCameraActivity.java
