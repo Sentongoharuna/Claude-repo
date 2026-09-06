@@ -165,7 +165,6 @@ jobs:
           import androidx.camera.core.FocusMeteringAction;
           import androidx.camera.core.MeteringPoint;
           import androidx.camera.core.Preview;
-          import androidx.camera.core.ResolutionInfo;
           import androidx.camera.core.ZoomState;
           import androidx.camera.lifecycle.ProcessCameraProvider;
           import androidx.camera.video.FallbackStrategy;
@@ -570,18 +569,11 @@ jobs:
                       lightButton.setText("LIGHT");
                       applyHighlightProtection();
 
-                      String actual = preferUhd ? "4K PREF" : "1080 PREF";
-                      ResolutionInfo info = candidateVideo.getResolutionInfo();
-                      if (info != null) {
-                          int rw = info.getResolution().getWidth();
-                          int rh = info.getResolution().getHeight();
-                          actual = rw + "x" + rh;
-                      }
-
+                      String quality = preferUhd ? "4K PREF" : "1080 PREF";
                       String fps = target60 ? "60T" : "30T";
                       String engine = ispEnhance ? "ADAPT+" : "NATURAL";
                       String stab = stabilization ? "STAB" : "NO-STAB";
-                      status.setText(actual + " • " + fps + " • " + engine + " • " + stab);
+                      status.setText(quality + " • " + fps + " • " + engine + " • " + stab);
 
                   } catch (Throwable error) {
                       activeAttempt++;
@@ -832,7 +824,7 @@ jobs:
           PASS high-quality 30fps noise processing
           PASS chromatic aberration correction
           PASS anti-banding AUTO
-          PASS actual bound resolution reporting
+          PASS quality-profile reporting without unsupported CameraX APIs
           PASS 60 fps target with 30 fps fallback
           PASS 50 Mbps UHD target bitrate
           PASS SDR / BT.709-friendly capture path
@@ -858,8 +850,8 @@ jobs:
           grep -q 'EDGE_MODE_HIGH_QUALITY' r20-enhance/app/src/main/java/com/sentongoharuna/ducamera/AdaptiveCameraActivity.java
           grep -q 'NOISE_REDUCTION_MODE_HIGH_QUALITY' r20-enhance/app/src/main/java/com/sentongoharuna/ducamera/AdaptiveCameraActivity.java
           grep -q 'COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY' r20-enhance/app/src/main/java/com/sentongoharuna/ducamera/AdaptiveCameraActivity.java
-          grep -q 'getResolutionInfo' r20-enhance/app/src/main/java/com/sentongoharuna/ducamera/AdaptiveCameraActivity.java
           ! grep -q 'getSelectedQuality' r20-enhance/app/src/main/java/com/sentongoharuna/ducamera/AdaptiveCameraActivity.java
+          ! grep -q 'getResolutionInfo' r20-enhance/app/src/main/java/com/sentongoharuna/ducamera/AdaptiveCameraActivity.java
 
           echo "PASS: R020 Adaptive Enhance source audit complete."
 
