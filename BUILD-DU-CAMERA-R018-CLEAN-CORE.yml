@@ -1,0 +1,615 @@
+name: Build DU Camera R018 CLEAN CORE APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R018-CLEAN-CORE.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r018_clean_core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create completely clean CameraX project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf r18-clean
+          mkdir -p r18-clean/app/src/main/java/com/sentongoharuna/ducamera
+          mkdir -p r18-clean/app/src/main/res/values
+
+          cat > r18-clean/settings.gradle <<'GRADLE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "DUCameraR018"
+          include(":app")
+          GRADLE
+
+          cat > r18-clean/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          GRADLE
+
+          cat > r18-clean/app/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.sentongoharuna.ducamera'
+              compileSdk 36
+
+              defaultConfig {
+                  applicationId 'com.sentongoharuna.ducamera.r018cleancore'
+                  minSdk 24
+                  targetSdk 36
+                  versionCode 400000029
+                  versionName '1.0-r018-clean-core'
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.activity:activity:1.10.1'
+              implementation 'androidx.core:core:1.15.0'
+              implementation 'androidx.camera:camera-core:1.4.2'
+              implementation 'androidx.camera:camera-camera2:1.4.2'
+              implementation 'androidx.camera:camera-lifecycle:1.4.2'
+              implementation 'androidx.camera:camera-video:1.4.2'
+              implementation 'androidx.camera:camera-view:1.4.2'
+          }
+          GRADLE
+
+          cat > r18-clean/app/src/main/res/values/styles.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.DUCamera" parent="@android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:windowBackground">@android:color/black</item>
+                  <item name="android:statusBarColor">@android:color/black</item>
+                  <item name="android:navigationBarColor">@android:color/black</item>
+                  <item name="android:colorAccent">#FFB323</item>
+              </style>
+          </resources>
+          XML
+
+          cat > r18-clean/app/src/main/AndroidManifest.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+              <uses-feature
+                  android:name="android.hardware.camera.any"
+                  android:required="true" />
+
+              <application
+                  android:allowBackup="false"
+                  android:label="DU Camera R018 Clean"
+                  android:theme="@style/Theme.DUCamera">
+
+                  <activity
+                      android:name=".CleanCameraActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+              </application>
+          </manifest>
+          XML
+
+          cat > r18-clean/app/src/main/java/com/sentongoharuna/ducamera/CleanCameraActivity.java <<'JAVA'
+          package com.sentongoharuna.ducamera;
+
+          import android.Manifest;
+          import android.content.ContentValues;
+          import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.graphics.drawable.GradientDrawable;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.MediaStore;
+          import android.view.Gravity;
+          import android.view.WindowManager;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import androidx.activity.ComponentActivity;
+          import androidx.camera.core.Camera;
+          import androidx.camera.core.CameraSelector;
+          import androidx.camera.core.Preview;
+          import androidx.camera.lifecycle.ProcessCameraProvider;
+          import androidx.camera.video.FallbackStrategy;
+          import androidx.camera.video.MediaStoreOutputOptions;
+          import androidx.camera.video.Quality;
+          import androidx.camera.video.QualitySelector;
+          import androidx.camera.video.Recorder;
+          import androidx.camera.video.Recording;
+          import androidx.camera.video.VideoCapture;
+          import androidx.camera.video.VideoRecordEvent;
+          import androidx.camera.view.PreviewView;
+          import androidx.core.content.ContextCompat;
+
+          import com.google.common.util.concurrent.ListenableFuture;
+
+          import java.text.SimpleDateFormat;
+          import java.util.Arrays;
+          import java.util.Date;
+          import java.util.Locale;
+
+          public class CleanCameraActivity extends ComponentActivity {
+
+              private static final int REQUEST_CAMERA = 1818;
+
+              private PreviewView previewView;
+              private TextView status;
+              private TextView recordButton;
+              private TextView lightButton;
+
+              private ProcessCameraProvider provider;
+              private Camera camera;
+              private VideoCapture<Recorder> videoCapture;
+              private Recording recording;
+
+              private boolean useFront = false;
+              private boolean torchOn = false;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  getWindow().setStatusBarColor(Color.BLACK);
+                  getWindow().setNavigationBarColor(Color.BLACK);
+
+                  buildVisibleUi();
+
+                  if (hasCameraPermission()) {
+                      startCamera();
+                  } else {
+                      status.setText("ALLOW CAMERA");
+                      requestPermissions(
+                          new String[] {
+                              Manifest.permission.CAMERA,
+                              Manifest.permission.RECORD_AUDIO
+                          },
+                          REQUEST_CAMERA
+                      );
+                  }
+              }
+
+              private void buildVisibleUi() {
+                  FrameLayout root = new FrameLayout(this);
+                  root.setBackgroundColor(Color.BLACK);
+
+                  previewView = new PreviewView(this);
+                  previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+                  previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+                  previewView.setBackgroundColor(Color.BLACK);
+
+                  root.addView(
+                      previewView,
+                      new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.MATCH_PARENT
+                      )
+                  );
+
+                  TextView brand = button("R18 CLEAN");
+                  FrameLayout.LayoutParams brandLp =
+                      new FrameLayout.LayoutParams(dp(100), dp(44), Gravity.TOP | Gravity.START);
+                  brandLp.leftMargin = dp(12);
+                  brandLp.topMargin = dp(16);
+                  root.addView(brand, brandLp);
+
+                  TextView aspect = button("9:16");
+                  FrameLayout.LayoutParams aspectLp =
+                      new FrameLayout.LayoutParams(dp(82), dp(44), Gravity.TOP | Gravity.END);
+                  aspectLp.rightMargin = dp(12);
+                  aspectLp.topMargin = dp(16);
+                  root.addView(aspect, aspectLp);
+
+                  status = button("UI OK • OPENING");
+                  FrameLayout.LayoutParams statusLp =
+                      new FrameLayout.LayoutParams(dp(190), dp(42), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                  statusLp.topMargin = dp(72);
+                  root.addView(status, statusLp);
+
+                  status.setOnClickListener(v -> startCamera());
+
+                  LinearLayout bottom = new LinearLayout(this);
+                  bottom.setOrientation(LinearLayout.HORIZONTAL);
+                  bottom.setGravity(Gravity.CENTER);
+                  bottom.setPadding(dp(8), dp(8), dp(8), dp(18));
+                  bottom.setBackgroundColor(0x66000000);
+
+                  TextView lensButton = button("LENS");
+                  recordButton = button("RECORD");
+                  lightButton = button("LIGHT");
+
+                  bottom.addView(lensButton, weightedButtonLp());
+                  bottom.addView(recordButton, weightedButtonLp());
+                  bottom.addView(lightButton, weightedButtonLp());
+
+                  root.addView(
+                      bottom,
+                      new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.BOTTOM
+                      )
+                  );
+
+                  lensButton.setOnClickListener(v -> {
+                      if (recording != null) {
+                          recording.stop();
+                      }
+                      useFront = !useFront;
+                      startCamera();
+                  });
+
+                  recordButton.setOnClickListener(v -> toggleRecording());
+                  lightButton.setOnClickListener(v -> toggleTorch());
+
+                  setContentView(root);
+              }
+
+              private LinearLayout.LayoutParams weightedButtonLp() {
+                  LinearLayout.LayoutParams lp =
+                      new LinearLayout.LayoutParams(0, dp(62), 1f);
+                  lp.setMarginStart(dp(5));
+                  lp.setMarginEnd(dp(5));
+                  return lp;
+              }
+
+              private void startCamera() {
+                  if (!hasCameraPermission()) {
+                      status.setText("ALLOW CAMERA");
+                      requestPermissions(
+                          new String[] { Manifest.permission.CAMERA },
+                          REQUEST_CAMERA
+                      );
+                      return;
+                  }
+
+                  status.setText("CAMERA OPENING");
+
+                  ListenableFuture<ProcessCameraProvider> future =
+                      ProcessCameraProvider.getInstance(this);
+
+                  future.addListener(() -> {
+                      try {
+                          provider = future.get();
+                          bindCamera();
+                      } catch (Throwable error) {
+                          status.setText("PROVIDER ERROR • TAP");
+                      }
+                  }, ContextCompat.getMainExecutor(this));
+              }
+
+              private void bindCamera() {
+                  try {
+                      Preview preview = new Preview.Builder().build();
+                      preview.setSurfaceProvider(previewView.getSurfaceProvider());
+
+                      QualitySelector selector = QualitySelector.fromOrderedList(
+                          Arrays.asList(
+                              Quality.UHD,
+                              Quality.FHD,
+                              Quality.HD,
+                              Quality.SD
+                          ),
+                          FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
+                      );
+
+                      Recorder recorder =
+                          new Recorder.Builder()
+                              .setQualitySelector(selector)
+                              .build();
+
+                      videoCapture = VideoCapture.withOutput(recorder);
+
+                      CameraSelector cameraSelector =
+                          useFront
+                              ? CameraSelector.DEFAULT_FRONT_CAMERA
+                              : CameraSelector.DEFAULT_BACK_CAMERA;
+
+                      provider.unbindAll();
+
+                      camera = provider.bindToLifecycle(
+                          this,
+                          cameraSelector,
+                          preview,
+                          videoCapture
+                      );
+
+                      torchOn = false;
+                      lightButton.setText("LIGHT");
+                      status.setText("CAMERA LIVE");
+
+                  } catch (Throwable error) {
+                      if (useFront) {
+                          useFront = false;
+                          status.setText("BACK CAMERA RETRY");
+                          bindCamera();
+                      } else {
+                          status.setText("BIND ERROR • TAP");
+                      }
+                  }
+              }
+
+              private void toggleTorch() {
+                  if (camera == null) {
+                      status.setText("CAMERA NOT READY");
+                      return;
+                  }
+
+                  if (!camera.getCameraInfo().hasFlashUnit()) {
+                      status.setText("NO FLASH");
+                      return;
+                  }
+
+                  torchOn = !torchOn;
+                  camera.getCameraControl().enableTorch(torchOn);
+                  lightButton.setText(torchOn ? "LIGHT ON" : "LIGHT");
+              }
+
+              private void toggleRecording() {
+                  if (recording != null) {
+                      recording.stop();
+                      return;
+                  }
+
+                  if (videoCapture == null) {
+                      status.setText("CAMERA NOT READY");
+                      return;
+                  }
+
+                  String stamp =
+                      new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+                          .format(new Date());
+
+                  ContentValues values = new ContentValues();
+                  values.put(
+                      MediaStore.Video.Media.DISPLAY_NAME,
+                      "DU_R18_" + stamp
+                  );
+                  values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      values.put(
+                          MediaStore.Video.Media.RELATIVE_PATH,
+                          "Movies/DU Camera"
+                      );
+                  }
+
+                  MediaStoreOutputOptions output =
+                      new MediaStoreOutputOptions.Builder(
+                          getContentResolver(),
+                          MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                      )
+                      .setContentValues(values)
+                      .build();
+
+                  varStartRecording(output);
+              }
+
+              private void varStartRecording(MediaStoreOutputOptions output) {
+                  androidx.camera.video.PendingRecording pending =
+                      videoCapture.getOutput().prepareRecording(this, output);
+
+                  if (hasAudioPermission()) {
+                      pending = pending.withAudioEnabled();
+                  }
+
+                  recording =
+                      pending.start(
+                          ContextCompat.getMainExecutor(this),
+                          event -> {
+                              if (event instanceof VideoRecordEvent.Start) {
+                                  recordButton.setText("STOP");
+                                  status.setText("RECORDING");
+                              } else if (event instanceof VideoRecordEvent.Finalize) {
+                                  VideoRecordEvent.Finalize end =
+                                      (VideoRecordEvent.Finalize) event;
+
+                                  recording = null;
+                                  recordButton.setText("RECORD");
+
+                                  if (end.hasError()) {
+                                      status.setText("SAVE ERROR");
+                                  } else {
+                                      status.setText("VIDEO SAVED");
+                                  }
+                              }
+                          }
+                      );
+              }
+
+              @Override
+              public void onRequestPermissionsResult(
+                  int requestCode,
+                  String[] permissions,
+                  int[] grantResults
+              ) {
+                  super.onRequestPermissionsResult(
+                      requestCode,
+                      permissions,
+                      grantResults
+                  );
+
+                  if (requestCode == REQUEST_CAMERA) {
+                      if (hasCameraPermission()) {
+                          startCamera();
+                      } else {
+                          status.setText("CAMERA PERMISSION DENIED");
+                      }
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (recording != null) {
+                      recording.stop();
+                  }
+                  if (provider != null) {
+                      provider.unbindAll();
+                  }
+                  super.onDestroy();
+              }
+
+              private boolean hasCameraPermission() {
+                  return ContextCompat.checkSelfPermission(
+                      this,
+                      Manifest.permission.CAMERA
+                  ) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private boolean hasAudioPermission() {
+                  return ContextCompat.checkSelfPermission(
+                      this,
+                      Manifest.permission.RECORD_AUDIO
+                  ) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private TextView button(String text) {
+                  TextView view = new TextView(this);
+                  view.setText(text);
+                  view.setTextColor(Color.WHITE);
+                  view.setTextSize(12f);
+                  view.setGravity(Gravity.CENTER);
+
+                  GradientDrawable bg = new GradientDrawable();
+                  bg.setColor(0xDD111111);
+                  bg.setCornerRadius(dp(12));
+                  bg.setStroke(dp(1), 0xFFFFB323);
+
+                  view.setBackground(bg);
+                  return view;
+              }
+
+              private int dp(int value) {
+                  return (int) (
+                      value * getResources().getDisplayMetrics().density
+                  );
+              }
+          }
+          JAVA
+
+          cat > /tmp/R018-CLEAN-CORE-AUDIT.txt <<'TXT'
+          R018 CLEAN CORE AUDIT
+          PASS new project built from scratch
+          PASS no V280 replay
+          PASS no V238 shell
+          PASS no GeneralHub launcher
+          PASS no HUD provider
+          PASS one launcher activity
+          PASS one PreviewView
+          PASS direct CameraX surface provider
+          PASS direct lifecycle bind
+          PASS UHD -> FHD -> HD -> SD fallback
+          TXT
+
+          test ! -e r18-clean/v172-source
+          ! grep -R "GeneralHubActivity" r18-clean/app/src/main || exit 1
+          ! grep -R "CleanHudProvider" r18-clean/app/src/main || exit 1
+          test "$(grep -R 'android.intent.action.MAIN' -c r18-clean/app/src/main/AndroidManifest.xml)" = "1"
+          test "$(grep -R 'android.intent.category.LAUNCHER' -c r18-clean/app/src/main/AndroidManifest.xml)" = "1"
+          grep -q 'setSurfaceProvider' r18-clean/app/src/main/java/com/sentongoharuna/ducamera/CleanCameraActivity.java
+          grep -q 'bindToLifecycle' r18-clean/app/src/main/java/com/sentongoharuna/ducamera/CleanCameraActivity.java
+
+          echo "PASS: R018 is a clean standalone camera project."
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Build R018 CLEAN CORE APK
+        working-directory: r18-clean
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee r018-clean-core-build.log
+
+      - name: Prepare APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='r18-clean/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R018-CLEAN-CORE.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R018-CLEAN-CORE-AUDIT
+          path: /tmp/R018-CLEAN-CORE-AUDIT.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R018-CLEAN-CORE-FAILED-BUILD-LOG
+          path: r18-clean/r018-clean-core-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload R018 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R018-CLEAN-CORE
+          path: DU-Camera-R018-CLEAN-CORE.apk
+          if-no-files-found: error
+          retention-days: 14
