@@ -56,7 +56,7 @@ jobs:
 
           cat > r22-detail/build.gradle <<'GRADLE'
           plugins {
-              id 'com.android.application' version '8.7.3' apply false
+              id 'com.android.application' version '8.11.1' apply false
           }
           GRADLE
 
@@ -67,7 +67,7 @@ jobs:
 
           android {
               namespace 'com.sentongoharuna.ducamera'
-              compileSdk 35
+              compileSdk 36
 
               defaultConfig {
                   applicationId 'com.sentongoharuna.ducamera.r022detailpro'
@@ -989,7 +989,6 @@ jobs:
                       DefaultEncoderFactory encoderFactory =
                           new DefaultEncoderFactory.Builder(this)
                               .setEnableFallback(true)
-                              .setEnableFormatFallback(true)
                               .setRequestedVideoEncoderSettings(
                                   encoderSettings
                               )
@@ -1269,6 +1268,9 @@ jobs:
 
           cat > /tmp/R022-DETAIL-PRO-AUDIT.txt <<'TXT'
           R022 DETAIL PRO AUDIT
+          PASS compileSdk 36 for Media3 1.10.1
+          PASS AGP 8.11.1 supports API 36
+          PASS Gradle 8.13 matches AGP 8.11.x
           PASS based on proven clean R18/R19/R20/R21 architecture
           PASS true Media3 recorded-file enhancement
           PASS contrast + saturation + RGB channel grade
@@ -1315,6 +1317,8 @@ jobs:
           grep -q 'CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES' r22-detail/app/src/main/java/com/sentongoharuna/ducamera/DetailProCameraActivity.java
           grep -q '55_000_000' r22-detail/app/src/main/java/com/sentongoharuna/ducamera/DetailProCameraActivity.java
           grep -q 'media3-transformer' r22-detail/app/build.gradle
+          grep -q "compileSdk 36" r22-detail/app/build.gradle
+          ! grep -q 'setEnableFormatFallback' r22-detail/app/src/main/java/com/sentongoharuna/ducamera/DetailProCameraActivity.java
           grep -q 'new Contrast(0.12f)' r22-detail/app/src/main/java/com/sentongoharuna/ducamera/DetailProCameraActivity.java
           grep -q 'adjustSaturation(9.0f)' r22-detail/app/src/main/java/com/sentongoharuna/ducamera/DetailProCameraActivity.java
           grep -q 'MimeTypes.VIDEO_H265' r22-detail/app/src/main/java/com/sentongoharuna/ducamera/DetailProCameraActivity.java
@@ -1339,12 +1343,12 @@ jobs:
 
       - name: Install Android platform
         shell: bash
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.11.1
+      - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.11.1
+          gradle-version: 8.13
 
       - name: Build R022 DETAIL PRO APK
         working-directory: r22-detail
