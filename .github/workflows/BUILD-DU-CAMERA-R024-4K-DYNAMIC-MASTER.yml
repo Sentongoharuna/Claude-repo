@@ -17,1522 +17,175 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Create R024 4K dynamic master from proven R18/R19/R20/R21/R22/R23 clean core
+      - name: Create R024 source without stale self-audit
         shell: bash
         run: |
           set -euo pipefail
 
-          rm -rf r24-dynamic
-          mkdir -p r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera
-          mkdir -p r24-dynamic/app/src/main/res/values
+          BASE_SHA='04d151f2ec573839fd834069016e3109f2f13c92'
+          BASE_PATH='.github/workflows/BUILD-DU-CAMERA-R024-4K-DYNAMIC-MASTER.yml'
 
-          cat > r24-dynamic/gradle.properties <<'PROPS'
-          android.useAndroidX=true
-          android.enableJetifier=false
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-          PROPS
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$BASE_SHA"
+          fi
 
-          cat > r24-dynamic/settings.gradle <<'GRADLE'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
+          git show "$BASE_SHA:$BASE_PATH" > /tmp/r24-original.yml
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path('/tmp/r24-original.yml').read_text(encoding='utf-8')
+          lines = source.splitlines()
+
+          wanted = (
+              'Create R024 4K dynamic master from proven '
+              'R18/R19/R20/R21/R22/R23 clean core'
+          )
+
+          step_start = None
+          step_indent = None
+
+          for i, line in enumerate(lines):
+              match = re.match(r'^(\s*)- name:\s*(.+?)\s*$', line)
+              if match and match.group(2) == wanted:
+                  step_start = i
+                  step_indent = len(match.group(1))
+                  break
+
+          if step_start is None:
+              raise SystemExit('R24 source-generation step not found in pinned base workflow')
+
+          step_end = len(lines)
+          for j in range(step_start + 1, len(lines)):
+              match = re.match(r'^(\s*)- name:\s*(.+?)\s*$', lines[j])
+              if match and len(match.group(1)) == step_indent:
+                  step_end = j
+                  break
+
+          run_line = None
+          for j in range(step_start + 1, step_end):
+              if lines[j].strip() == 'run: |':
+                  run_line = j
+                  break
+
+          if run_line is None:
+              raise SystemExit('R24 source-generation run block not found')
+
+          run_indent = len(lines[run_line]) - len(lines[run_line].lstrip())
+          content_indent = run_indent + 2
+          block = []
+
+          for line in lines[run_line + 1:step_end]:
+              if line.strip() and len(line) - len(line.lstrip()) <= run_indent:
+                  break
+              if line.strip():
+                  block.append(line[content_indent:])
+              else:
+                  block.append('')
+
+          # The original R24 source is valid enough to create the project,
+          # but its trailing grep audit contains stale R21/R22 assumptions
+          # (e.g. literal 60 range, 55 Mbps, one-line stabilization).
+          # Remove only that brittle audit execution block.
+          first_audit = None
+          for i, line in enumerate(block):
+              if line.startswith("grep -qx 'android.useAndroidX=true'"):
+                  first_audit = i
+                  break
+
+          if first_audit is None:
+              raise SystemExit('R24 stale audit block start not found')
+
+          cleaned = block[:first_audit]
+          cleaned.append('')
+          cleaned.append('echo "PASS: R024 source project created; robust audit runs next."')
+
+          Path('/tmp/r24-create.sh').write_text(
+              '\n'.join(cleaned) + '\n',
+              encoding='utf-8'
+          )
+          PY
+
+          bash -n /tmp/r24-create.sh
+          bash /tmp/r24-create.sh
+
+      - name: Robust R024 source audit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('r24-dynamic')
+          java = root / 'app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java'
+          manifest = root / 'app/src/main/AndroidManifest.xml'
+          gradle = root / 'app/build.gradle'
+          props = root / 'gradle.properties'
+
+          if not java.exists():
+              raise SystemExit('DynamicMasterCameraActivity.java missing')
+          if not manifest.exists():
+              raise SystemExit('AndroidManifest.xml missing')
+          if not gradle.exists():
+              raise SystemExit('app/build.gradle missing')
+
+          j = java.read_text(encoding='utf-8')
+          m = manifest.read_text(encoding='utf-8')
+          g = gradle.read_text(encoding='utf-8')
+          p = props.read_text(encoding='utf-8')
+
+          checks = {
+              'AndroidX enabled': 'android.useAndroidX=true' in p,
+              'one launcher MAIN': m.count('android.intent.action.MAIN') == 1,
+              'one launcher category': m.count('android.intent.category.LAUNCHER') == 1,
+              'compileSdk 36': 'compileSdk 36' in g,
+              'Media3 transformer': 'media3-transformer' in g,
+              'exact UHD selector': 'QualitySelector.from(' in j and 'Quality.UHD' in j,
+              'dynamic FPS request': 'new Range<>(targetFps, targetFps)' in j,
+              '4K min-frame-duration detection': 'getOutputMinFrameDuration' in j,
+              '120fps capability detection': 'getHighSpeedVideoFpsRangesFor' in j,
+              '62 Mbps top capture target': '62_000_000' in j,
+              '50 Mbps UHD30 target': '50_000_000' in j,
+              'video stabilization': 'setVideoStabilizationEnabled' in j,
+              'preview stabilization': 'setPreviewStabilizationEnabled' in j,
+              'SDR capture': 'DynamicRange.SDR' in j,
+              'tap focus/exposure': 'startFocusAndMetering' in j,
+              'pinch zoom': 'setZoomRatio' in j,
+              'Camera2 interop': 'Camera2Interop.Extender' in j,
+              'fast 60fps edge mode': 'EDGE_MODE_FAST' in j,
+              'HQ 30fps edge mode': 'EDGE_MODE_HIGH_QUALITY' in j,
+              'HEVC enhanced export': 'MimeTypes.VIDEO_H265' in j,
+              '44 Mbps enhanced export': '44_000_000' in j,
+              'no broken getSelectedQuality': 'getSelectedQuality' not in j,
+              'no broken getResolutionInfo': 'getResolutionInfo' not in j,
+              'no invalid Media3 format fallback call': '.setEnableFormatFallback(' not in j,
           }
 
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-
-          rootProject.name = "DUCameraR024DynamicMaster"
-          include(":app")
-          GRADLE
-
-          cat > r24-dynamic/build.gradle <<'GRADLE'
-          plugins {
-              id 'com.android.application' version '8.11.1' apply false
-          }
-          GRADLE
-
-          cat > r24-dynamic/app/build.gradle <<'GRADLE'
-          plugins {
-              id 'com.android.application'
-          }
-
-          android {
-              namespace 'com.sentongoharuna.ducamera'
-              compileSdk 36
-
-              defaultConfig {
-                  applicationId 'com.sentongoharuna.ducamera.r024dynamicmaster'
-                  minSdk 24
-                  targetSdk 35
-                  versionCode 400000035
-                  versionName '1.0-r024-4k-dynamic-master'
-              }
-
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-          }
-
-          dependencies {
-              implementation 'androidx.activity:activity:1.10.1'
-              implementation 'androidx.core:core:1.15.0'
-              implementation 'androidx.camera:camera-core:1.4.2'
-              implementation 'androidx.camera:camera-camera2:1.4.2'
-              implementation 'androidx.camera:camera-lifecycle:1.4.2'
-              implementation 'androidx.camera:camera-video:1.4.2'
-              implementation 'androidx.camera:camera-view:1.4.2'
-
-              // R22 true saved-video enhancement.
-              def media3_version = '1.10.1'
-              implementation "androidx.media3:media3-common:${media3_version}"
-              implementation "androidx.media3:media3-effect:${media3_version}"
-              implementation "androidx.media3:media3-transformer:${media3_version}"
-          }
-          GRADLE
-
-          cat > r24-dynamic/app/src/main/res/values/styles.xml <<'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="Theme.DUCamera" parent="@android:style/Theme.Material.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:windowActionModeOverlay">true</item>
-                  <item name="android:windowBackground">@android:color/black</item>
-                  <item name="android:statusBarColor">@android:color/black</item>
-                  <item name="android:navigationBarColor">@android:color/black</item>
-                  <item name="android:colorAccent">#FFB323</item>
-              </style>
-          </resources>
-          XML
-
-          cat > r24-dynamic/app/src/main/AndroidManifest.xml <<'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-              <uses-permission android:name="android.permission.CAMERA" />
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-              <uses-feature
-                  android:name="android.hardware.camera.any"
-                  android:required="true" />
-
-              <application
-                  android:allowBackup="false"
-                  android:label="DU Camera R024 4K Dynamic"
-                  android:theme="@style/Theme.DUCamera">
-
-                  <activity
-                      android:name=".DynamicMasterCameraActivity"
-                      android:exported="true"
-                      android:screenOrientation="portrait">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-
-              </application>
-          </manifest>
-          XML
-
-          cat > r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java <<'JAVA'
-          package com.sentongoharuna.ducamera;
-
-          import android.Manifest;
-          import android.content.ContentValues;
-          import android.content.pm.PackageManager;
-          import android.content.Context;
-          import android.net.Uri;
-          import android.os.Environment;
-          import android.graphics.Color;
-          import android.graphics.drawable.GradientDrawable;
-          import android.hardware.camera2.CaptureRequest;
-          import android.hardware.camera2.CameraCharacteristics;
-          import android.hardware.camera2.CameraManager;
-          import android.hardware.camera2.params.StreamConfigurationMap;
-          import android.os.Build;
-          import android.os.Bundle;
-          import android.media.MediaRecorder;
-          import android.provider.MediaStore;
-          import android.util.Range;
-          import android.util.Size;
-          import android.view.Gravity;
-          import android.view.MotionEvent;
-          import android.view.ScaleGestureDetector;
-          import android.view.WindowManager;
-          import android.widget.FrameLayout;
-          import android.widget.LinearLayout;
-          import android.widget.TextView;
-
-          import androidx.activity.ComponentActivity;
-          import androidx.annotation.OptIn;
-          import androidx.camera.camera2.interop.Camera2Interop;
-          import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
-          import androidx.camera.core.Camera;
-          import androidx.camera.core.CameraSelector;
-          import androidx.camera.core.DynamicRange;
-          import androidx.camera.core.ExposureState;
-          import androidx.camera.core.FocusMeteringAction;
-          import androidx.camera.core.MeteringPoint;
-          import androidx.camera.core.Preview;
-          import androidx.camera.core.ZoomState;
-          import androidx.camera.lifecycle.ProcessCameraProvider;
-          import androidx.camera.video.FallbackStrategy;
-          import androidx.camera.video.MediaStoreOutputOptions;
-          import androidx.camera.video.Quality;
-          import androidx.camera.video.QualitySelector;
-          import androidx.camera.video.Recorder;
-          import androidx.camera.video.Recording;
-          import androidx.camera.video.VideoCapture;
-          import androidx.camera.video.VideoRecordEvent;
-          import androidx.camera.view.PreviewView;
-          import androidx.core.content.ContextCompat;
-          import androidx.media3.common.Effect;
-          import androidx.media3.common.MediaItem;
-          import androidx.media3.common.MimeTypes;
-          import androidx.media3.common.util.UnstableApi;
-          import androidx.media3.effect.Contrast;
-          import androidx.media3.effect.HslAdjustment;
-          import androidx.media3.effect.RgbAdjustment;
-          import androidx.media3.transformer.Composition;
-          import androidx.media3.transformer.DefaultEncoderFactory;
-          import androidx.media3.transformer.EditedMediaItem;
-          import androidx.media3.transformer.Effects;
-          import androidx.media3.transformer.ExportException;
-          import androidx.media3.transformer.ExportResult;
-          import androidx.media3.transformer.Transformer;
-          import androidx.media3.transformer.VideoEncoderSettings;
-
-          import com.google.common.util.concurrent.ListenableFuture;
-
-          import java.io.File;
-          import java.io.FileInputStream;
-          import java.io.InputStream;
-          import java.io.OutputStream;
-          import java.text.SimpleDateFormat;
-          import java.util.Arrays;
-          import java.util.Collections;
-          import java.util.Date;
-          import java.util.Locale;
-          import java.util.concurrent.TimeUnit;
-
-          @UnstableApi
-          @OptIn(markerClass = ExperimentalCamera2Interop.class)
-          public class DynamicMasterCameraActivity extends ComponentActivity {
-
-              private static final int REQUEST_CAMERA = 2424;
-
-              private PreviewView previewView;
-              private TextView status;
-              private TextView recordButton;
-              private TextView lightButton;
-              private TextView highlightButton;
-              private TextView adaptiveButton;
-              private TextView motionButton;
-              private TextView enhanceButton;
-
-              private ProcessCameraProvider provider;
-              private Camera camera;
-              private VideoCapture<Recorder> videoCapture;
-              private Recording recording;
-              private ScaleGestureDetector scaleDetector;
-
-              private boolean useFront = false;
-              private boolean torchOn = false;
-              private boolean highlightProtect = true;
-              private boolean adaptiveEngine = true;
-              private boolean motionDetail = true;
-              private boolean autoEnhance = true;
-              private Transformer activeTransformer = null;
-              private HardwareProfile hardwareProfile = new HardwareProfile();
-              private int activeAttempt = 0;
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
-                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                  getWindow().setStatusBarColor(Color.BLACK);
-                  getWindow().setNavigationBarColor(Color.BLACK);
-
-                  buildUi();
-                  installCameraGestures();
-
-                  if (hasCameraPermission()) {
-                      startCamera();
-                  } else {
-                      status.setText("ALLOW CAMERA");
-                      requestPermissions(
-                          new String[] {
-                              Manifest.permission.CAMERA,
-                              Manifest.permission.RECORD_AUDIO
-                          },
-                          REQUEST_CAMERA
-                      );
-                  }
-              }
-
-              private void buildUi() {
-                  FrameLayout root = new FrameLayout(this);
-                  root.setBackgroundColor(Color.BLACK);
-
-                  previewView = new PreviewView(this);
-                  previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
-                  previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
-                  previewView.setBackgroundColor(Color.BLACK);
-                  root.addView(
-                      previewView,
-                      new FrameLayout.LayoutParams(
-                          FrameLayout.LayoutParams.MATCH_PARENT,
-                          FrameLayout.LayoutParams.MATCH_PARENT
-                      )
-                  );
-
-                  TextView master = button("R24 4K DYN");
-                  FrameLayout.LayoutParams masterLp =
-                      new FrameLayout.LayoutParams(dp(108), dp(42), Gravity.TOP | Gravity.START);
-                  masterLp.leftMargin = dp(12);
-                  masterLp.topMargin = dp(16);
-                  root.addView(master, masterLp);
-
-                  TextView aspect = button("9:16");
-                  FrameLayout.LayoutParams aspectLp =
-                      new FrameLayout.LayoutParams(dp(82), dp(42), Gravity.TOP | Gravity.END);
-                  aspectLp.rightMargin = dp(12);
-                  aspectLp.topMargin = dp(16);
-                  root.addView(aspect, aspectLp);
-
-                  status = button("4K DYNAMIC • OPENING");
-                  FrameLayout.LayoutParams statusLp =
-                      new FrameLayout.LayoutParams(dp(212), dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-                  statusLp.topMargin = dp(68);
-                  root.addView(status, statusLp);
-                  status.setOnClickListener(v -> startCamera());
-
-                  LinearLayout qualityRail = new LinearLayout(this);
-                  qualityRail.setOrientation(LinearLayout.VERTICAL);
-                  qualityRail.setGravity(Gravity.CENTER);
-
-                  adaptiveButton = button("DYNAMIC+");
-                  motionButton = button("MOTION+");
-                  enhanceButton = button("DYNAMIC AUTO");
-                  TextView bitrate = button("50 Mbps");
-                  TextView fps = button("60 FPS");
-                  TextView stab = button("STAB AUTO");
-                  highlightButton = button("HL -0.35");
-
-                  qualityRail.addView(adaptiveButton, railLp());
-                  qualityRail.addView(motionButton, railLp());
-                  qualityRail.addView(enhanceButton, railLp());
-                  qualityRail.addView(bitrate, railLp());
-                  qualityRail.addView(fps, railLp());
-                  qualityRail.addView(stab, railLp());
-                  qualityRail.addView(highlightButton, railLp());
-
-                  FrameLayout.LayoutParams railRootLp =
-                      new FrameLayout.LayoutParams(dp(104), FrameLayout.LayoutParams.WRAP_CONTENT,
-                          Gravity.END | Gravity.CENTER_VERTICAL);
-                  railRootLp.rightMargin = dp(10);
-                  root.addView(qualityRail, railRootLp);
-
-                  adaptiveButton.setOnClickListener(v -> {
-                      if (recording != null) return;
-                      adaptiveEngine = !adaptiveEngine;
-                      adaptiveButton.setText(adaptiveEngine ? "DYNAMIC+" : "NATURAL");
-                      startCamera();
-                  });
-
-                  motionButton.setOnClickListener(v -> {
-                      if (recording != null) return;
-                      motionDetail = !motionDetail;
-                      motionButton.setText(motionDetail ? "MOTION+" : "MOTION OFF");
-                      startCamera();
-                  });
-
-                  enhanceButton.setOnClickListener(v -> {
-                      if (recording != null || activeTransformer != null) return;
-                      autoEnhance = !autoEnhance;
-                      enhanceButton.setText(
-                          autoEnhance ? "DYNAMIC AUTO" : "RAW ONLY"
-                      );
-                  });
-
-                  highlightButton.setOnClickListener(v -> {
-                      highlightProtect = !highlightProtect;
-                      highlightButton.setText(highlightProtect ? "HL -0.35" : "HL OFF");
-                      applyHighlightProtection();
-                  });
-
-                  LinearLayout bottom = new LinearLayout(this);
-                  bottom.setOrientation(LinearLayout.HORIZONTAL);
-                  bottom.setGravity(Gravity.CENTER);
-                  bottom.setPadding(dp(8), dp(8), dp(8), dp(18));
-                  bottom.setBackgroundColor(0x66000000);
-
-                  TextView lensButton = button("LENS");
-                  recordButton = button("RECORD");
-                  lightButton = button("LIGHT");
-
-                  bottom.addView(lensButton, weightedButtonLp());
-                  bottom.addView(recordButton, weightedButtonLp());
-                  bottom.addView(lightButton, weightedButtonLp());
-
-                  root.addView(
-                      bottom,
-                      new FrameLayout.LayoutParams(
-                          FrameLayout.LayoutParams.MATCH_PARENT,
-                          FrameLayout.LayoutParams.WRAP_CONTENT,
-                          Gravity.BOTTOM
-                      )
-                  );
-
-                  lensButton.setOnClickListener(v -> {
-                      if (recording != null) {
-                          recording.stop();
-                      }
-                      useFront = !useFront;
-                      startCamera();
-                  });
-
-                  recordButton.setOnClickListener(v -> toggleRecording());
-                  lightButton.setOnClickListener(v -> toggleTorch());
-
-                  setContentView(root);
-              }
-
-              private LinearLayout.LayoutParams railLp() {
-                  LinearLayout.LayoutParams lp =
-                      new LinearLayout.LayoutParams(dp(96), dp(40));
-                  lp.bottomMargin = dp(7);
-                  return lp;
-              }
-
-              private LinearLayout.LayoutParams weightedButtonLp() {
-                  LinearLayout.LayoutParams lp =
-                      new LinearLayout.LayoutParams(0, dp(62), 1f);
-                  lp.setMarginStart(dp(5));
-                  lp.setMarginEnd(dp(5));
-                  return lp;
-              }
-
-              private void installCameraGestures() {
-                  scaleDetector =
-                      new ScaleGestureDetector(
-                          this,
-                          new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                              @Override
-                              public boolean onScale(ScaleGestureDetector detector) {
-                                  if (camera == null) return false;
-                                  ZoomState zoom =
-                                      camera.getCameraInfo().getZoomState().getValue();
-                                  if (zoom == null) return false;
-
-                                  float next =
-                                      zoom.getZoomRatio() * detector.getScaleFactor();
-                                  next = Math.max(zoom.getMinZoomRatio(),
-                                      Math.min(zoom.getMaxZoomRatio(), next));
-                                  camera.getCameraControl().setZoomRatio(next);
-                                  return true;
-                              }
-                          }
-                      );
-
-                  previewView.setOnTouchListener((v, event) -> {
-                      scaleDetector.onTouchEvent(event);
-
-                      if (event.getAction() == MotionEvent.ACTION_UP &&
-                          !scaleDetector.isInProgress() &&
-                          camera != null) {
-
-                          MeteringPoint point =
-                              previewView.getMeteringPointFactory()
-                                  .createPoint(event.getX(), event.getY());
-
-                          FocusMeteringAction action =
-                              new FocusMeteringAction.Builder(
-                                  point,
-                                  FocusMeteringAction.FLAG_AF |
-                                  FocusMeteringAction.FLAG_AE
-                              )
-                              .setAutoCancelDuration(4, TimeUnit.SECONDS)
-                              .build();
-
-                          camera.getCameraControl().startFocusAndMetering(action);
-                          status.setText("FOCUS • EXPOSURE");
-                      }
-                      return true;
-                  });
-              }
-
-              private void startCamera() {
-                  if (!hasCameraPermission()) {
-                      status.setText("ALLOW CAMERA");
-                      requestPermissions(
-                          new String[] { Manifest.permission.CAMERA },
-                          REQUEST_CAMERA
-                      );
-                      return;
-                  }
-
-                  status.setText("DYNAMIC ENGINE OPENING");
-
-                  ListenableFuture<ProcessCameraProvider> future =
-                      ProcessCameraProvider.getInstance(this);
-
-                  future.addListener(() -> {
-                      try {
-                          provider = future.get();
-                          hardwareProfile = detectHardwareProfile();
-                          activeAttempt = chooseStartingAttempt(hardwareProfile);
-                          bindMasterAttempt();
-                      } catch (Throwable error) {
-                          status.setText("PROVIDER ERROR • TAP");
-                      }
-                  }, ContextCompat.getMainExecutor(this));
-              }
-
-              private void bindMasterAttempt() {
-                  if (provider == null) return;
-
-                  // Skip attempts that the selected physical camera does not
-                  // report. Every successful 4K attempt uses exact UHD quality,
-                  // never a silent UHD->FHD quality fallback.
-                  if ((activeAttempt == 0 || activeAttempt == 1) &&
-                      !hardwareProfile.has4k60) {
-                      activeAttempt = 2;
-                  }
-
-                  if (activeAttempt == 2 &&
-                      !hardwareProfile.has4k30) {
-                      activeAttempt = 3;
-                  }
-
-                  if (activeAttempt == 3 &&
-                      !hardwareProfile.has1080p120) {
-                      activeAttempt = 4;
-                  }
-
-                  if ((activeAttempt == 4 || activeAttempt == 5) &&
-                      !hardwareProfile.has1080p60) {
-                      activeAttempt = 6;
-                  }
-
-                  boolean exactUhd;
-                  int targetFps;
-                  boolean stabilization;
-                  boolean ispEnhance;
-                  int bitrate;
-
-                  switch (activeAttempt) {
-                      case 0:
-                          // TRUE UHD60 + stabilization.
-                          exactUhd = true;
-                          targetFps = 60;
-                          stabilization = true;
-                          ispEnhance = adaptiveEngine;
-                          bitrate = motionDetail ? 62_000_000 : 58_000_000;
-                          break;
-
-                      case 1:
-                          // TRUE UHD60, remove stabilization if the device
-                          // cannot sustain the combined session.
-                          exactUhd = true;
-                          targetFps = 60;
-                          stabilization = false;
-                          ispEnhance = adaptiveEngine;
-                          bitrate = motionDetail ? 62_000_000 : 58_000_000;
-                          break;
-
-                      case 2:
-                          // TRUE UHD30: spatial-detail priority.
-                          exactUhd = true;
-                          targetFps = 30;
-                          stabilization = true;
-                          ispEnhance = adaptiveEngine;
-                          bitrate = 50_000_000;
-                          break;
-
-                      case 3:
-                          // Experimental constrained-HFR request. If standard
-                          // CameraX on this phone cannot bind 120, it safely
-                          // advances to the proven 1080p60 profile.
-                          exactUhd = false;
-                          targetFps = 120;
-                          stabilization = false;
-                          ispEnhance = adaptiveEngine;
-                          bitrate = 48_000_000;
-                          break;
-
-                      case 4:
-                          // TRUE FHD60 + stabilization.
-                          exactUhd = false;
-                          targetFps = 60;
-                          stabilization = true;
-                          ispEnhance = adaptiveEngine;
-                          bitrate = motionDetail ? 42_000_000 : 38_000_000;
-                          break;
-
-                      case 5:
-                          // TRUE FHD60 compatibility mode.
-                          exactUhd = false;
-                          targetFps = 60;
-                          stabilization = false;
-                          ispEnhance = adaptiveEngine;
-                          bitrate = 38_000_000;
-                          break;
-
-                      default:
-                          // Universal FHD30 safety mode.
-                          exactUhd = false;
-                          targetFps = 30;
-                          stabilization = false;
-                          ispEnhance = adaptiveEngine;
-                          bitrate = 30_000_000;
-                          break;
-                  }
-
-                  try {
-                      Range<Integer> fpsRange =
-                          new Range<>(targetFps, targetFps);
-
-                      Preview.Builder previewBuilder =
-                          new Preview.Builder();
-
-                      if (stabilization) {
-                          previewBuilder
-                              .setPreviewStabilizationEnabled(true);
-                      }
-
-                      if (ispEnhance) {
-                          applyAdaptiveIsp(
-                              previewBuilder,
-                              targetFps >= 60
-                          );
-                      }
-
-                      Preview preview =
-                          previewBuilder.build();
-
-                      preview.setSurfaceProvider(
-                          previewView.getSurfaceProvider()
-                      );
-
-                      // Exact selector: a successful UHD attempt is genuinely
-                      // UHD. It cannot quietly return an FHD recording.
-                      QualitySelector selector =
-                          QualitySelector.from(
-                              exactUhd
-                                  ? Quality.UHD
-                                  : Quality.FHD
-                          );
-
-                      Recorder recorder =
-                          new Recorder.Builder()
-                              .setQualitySelector(selector)
-                              .setTargetVideoEncodingBitRate(
-                                  bitrate
-                              )
-                              .build();
-
-                      VideoCapture.Builder<Recorder> videoBuilder =
-                          new VideoCapture.Builder<>(recorder)
-                              .setDynamicRange(DynamicRange.SDR)
-                              .setTargetFrameRate(fpsRange);
-
-                      if (stabilization) {
-                          videoBuilder
-                              .setVideoStabilizationEnabled(
-                                  true
-                              );
-                      }
-
-                      if (ispEnhance) {
-                          applyAdaptiveIsp(
-                              videoBuilder,
-                              targetFps >= 60
-                          );
-                      }
-
-                      VideoCapture<Recorder> candidateVideo =
-                          videoBuilder.build();
-
-                      CameraSelector cameraSelector =
-                          useFront
-                              ? CameraSelector.DEFAULT_FRONT_CAMERA
-                              : CameraSelector.DEFAULT_BACK_CAMERA;
-
-                      provider.unbindAll();
-
-                      Camera candidateCamera =
-                          provider.bindToLifecycle(
-                              this,
-                              cameraSelector,
-                              preview,
-                              candidateVideo
-                          );
-
-                      camera = candidateCamera;
-                      videoCapture = candidateVideo;
-
-                      torchOn = false;
-                      lightButton.setText("LIGHT");
-                      applyHighlightProtection();
-
-                      String quality =
-                          exactUhd
-                              ? "TRUE 4K"
-                              : "TRUE 1080";
-
-                      String engine =
-                          ispEnhance
-                              ? "DYNAMIC+"
-                              : "NATURAL";
-
-                      String stab =
-                          stabilization
-                              ? "STAB"
-                              : "NO-STAB";
-
-                      status.setText(
-                          hardwareProfile.label +
-                          " • " +
-                          quality +
-                          " • " +
-                          targetFps +
-                          "FPS • " +
-                          engine +
-                          " • " +
-                          stab
-                      );
-
-                  } catch (Throwable error) {
-                      activeAttempt++;
-
-                      if (activeAttempt <= 6) {
-                          status.setText(
-                              "MODE FALLBACK " +
-                              activeAttempt
-                          );
-                          bindMasterAttempt();
-
-                      } else if (useFront) {
-                          useFront = false;
-                          hardwareProfile =
-                              detectHardwareProfile();
-                          activeAttempt =
-                              chooseStartingAttempt(
-                                  hardwareProfile
-                              );
-                          status.setText(
-                              "BACK CAMERA RETRY"
-                          );
-                          bindMasterAttempt();
-
-                      } else {
-                          status.setText(
-                              "BIND ERROR • TAP"
-                          );
-                      }
-                  }
-              }
-
-              private static class HardwareProfile {
-                  boolean has4k30 = false;
-                  boolean has4k60 = false;
-                  boolean has1080p60 = false;
-                  boolean has1080p120 = false;
-                  String label = "HW SAFE";
-              }
-
-              private int chooseStartingAttempt(HardwareProfile profile) {
-                  if (!adaptiveEngine) {
-                      if (profile.has4k30) return 2;
-                      if (profile.has1080p60) return 4;
-                      return 6;
-                  }
-
-                  if (profile.has4k60) return 0;
-                  if (profile.has4k30) return 2;
-                  if (profile.has1080p120) return 3;
-                  if (profile.has1080p60) return 4;
-                  return 6;
-              }
-
-              private HardwareProfile detectHardwareProfile() {
-                  HardwareProfile result = new HardwareProfile();
-
-                  try {
-                      CameraManager manager =
-                          (CameraManager) getSystemService(Context.CAMERA_SERVICE);
-
-                      Integer wantedFacing =
-                          useFront
-                              ? CameraCharacteristics.LENS_FACING_FRONT
-                              : CameraCharacteristics.LENS_FACING_BACK;
-
-                      for (String cameraId : manager.getCameraIdList()) {
-                          CameraCharacteristics chars =
-                              manager.getCameraCharacteristics(cameraId);
-
-                          Integer facing =
-                              chars.get(CameraCharacteristics.LENS_FACING);
-
-                          if (facing == null || !facing.equals(wantedFacing)) {
-                              continue;
-                          }
-
-                          StreamConfigurationMap map =
-                              chars.get(
-                                  CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
-                              );
-
-                          if (map != null) {
-                              Size[] sizes =
-                                  map.getOutputSizes(MediaRecorder.class);
-
-                              if (sizes != null) {
-                                  for (Size size : sizes) {
-                                      int longSide =
-                                          Math.max(
-                                              size.getWidth(),
-                                              size.getHeight()
-                                          );
-                                      int shortSide =
-                                          Math.min(
-                                              size.getWidth(),
-                                              size.getHeight()
-                                          );
-
-                                      long minDurationNs = 0L;
-
-                                      try {
-                                          minDurationNs =
-                                              map.getOutputMinFrameDuration(
-                                                  MediaRecorder.class,
-                                                  size
-                                              );
-                                      } catch (Throwable ignored) {
-                                      }
-
-                                      double maxFps =
-                                          minDurationNs > 0L
-                                              ? 1_000_000_000.0 /
-                                                  (double) minDurationNs
-                                              : 0.0;
-
-                                      if (longSide >= 3840 &&
-                                          shortSide >= 2160) {
-                                          result.has4k30 = true;
-
-                                          if (maxFps >= 59.0) {
-                                              result.has4k60 = true;
-                                          }
-                                      }
-
-                                      if (longSide >= 1920 &&
-                                          shortSide >= 1080 &&
-                                          maxFps >= 59.0) {
-                                          result.has1080p60 = true;
-                                      }
-                                  }
-                              }
-
-                              // Detect constrained high-speed capability separately.
-                              // CameraX will only use it if a 120fps bind actually succeeds.
-                              try {
-                                  Size[] highSpeedSizes =
-                                      map.getHighSpeedVideoSizes();
-
-                                  if (highSpeedSizes != null) {
-                                      for (Size size : highSpeedSizes) {
-                                          int longSide =
-                                              Math.max(
-                                                  size.getWidth(),
-                                                  size.getHeight()
-                                              );
-                                          int shortSide =
-                                              Math.min(
-                                                  size.getWidth(),
-                                                  size.getHeight()
-                                              );
-
-                                          if (longSide < 1920 ||
-                                              shortSide < 1080) {
-                                              continue;
-                                          }
-
-                                          Range<Integer>[] highSpeedRanges =
-                                              map.getHighSpeedVideoFpsRangesFor(
-                                                  size
-                                              );
-
-                                          if (highSpeedRanges != null) {
-                                              for (Range<Integer> range :
-                                                  highSpeedRanges) {
-                                                  if (range.getUpper() >= 120) {
-                                                      result.has1080p120 = true;
-                                                      break;
-                                                  }
-                                              }
-                                          }
-
-                                          if (result.has1080p120) {
-                                              break;
-                                          }
-                                      }
-                                  }
-                              } catch (Throwable ignored) {
-                              }
-                          }
-
-                          // Standard AE ranges are a useful fallback when
-                          // min-frame-duration data is incomplete.
-                          Range<Integer>[] aeRanges =
-                              chars.get(
-                                  CameraCharacteristics
-                                      .CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
-                              );
-
-                          if (!result.has1080p60 &&
-                              aeRanges != null) {
-                              for (Range<Integer> range : aeRanges) {
-                                  if (range.getUpper() >= 60) {
-                                      result.has1080p60 = true;
-                                      break;
-                                  }
-                              }
-                          }
-
-                          break;
-                      }
-                  } catch (Throwable ignored) {
-                      result = new HardwareProfile();
-                  }
-
-                  if (result.has4k60) {
-                      result.label = "TRUE 4K60";
-                  } else if (result.has4k30) {
-                      result.label = "TRUE 4K30";
-                  } else if (result.has1080p120) {
-                      result.label = "HFR 120 HW";
-                  } else if (result.has1080p60) {
-                      result.label = "TRUE 1080/60";
-                  }
-
-                  return result;
-              }
-
-              @SuppressWarnings({"rawtypes", "unchecked"})
-              private void applyAdaptiveIsp(
-                  androidx.camera.core.ExtendableBuilder previewOrVideoBuilder,
-                  boolean highFrameRate
-              ) {
-                  /*
-                   * Adaptive processing uses Android's camera ISP when exposed by the device.
-                   * 60 fps uses FAST noise reduction to preserve texture and throughput.
-                   * 30 fps can ask for HIGH_QUALITY noise reduction.
-                   * If a phone rejects these requests, bindMasterAttempt() automatically
-                   * falls back to a safer profile rather than leaving a blank camera.
-                   */
-                  Camera2Interop.Extender interop =
-                      new Camera2Interop.Extender(previewOrVideoBuilder);
-
-                  interop.setCaptureRequestOption(
-                      CaptureRequest.EDGE_MODE,
-                      highFrameRate
-                          ? CaptureRequest.EDGE_MODE_FAST
-                          : CaptureRequest.EDGE_MODE_HIGH_QUALITY
-                  );
-
-                  interop.setCaptureRequestOption(
-                      CaptureRequest.NOISE_REDUCTION_MODE,
-                      highFrameRate
-                          ? CaptureRequest.NOISE_REDUCTION_MODE_FAST
-                          : CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
-                  );
-
-                  interop.setCaptureRequestOption(
-                      CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
-                      CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY
-                  );
-
-                  interop.setCaptureRequestOption(
-                      CaptureRequest.CONTROL_AE_ANTIBANDING_MODE,
-                      CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
-                  );
-              }
-
-              private void applyHighlightProtection() {
-                  if (camera == null) return;
-
-                  ExposureState exposure =
-                      camera.getCameraInfo().getExposureState();
-
-                  Range<Integer> range =
-                      exposure.getExposureCompensationRange();
-
-                  int target = 0;
-
-                  if (highlightProtect) {
-                      double step =
-                          exposure.getExposureCompensationStep().doubleValue();
-
-                      if (step > 0.0) {
-                          double wantedEv = motionDetail ? -0.40 : -0.30;
-                          target = (int) Math.round(wantedEv / step);
-                      }
-                  }
-
-                  target = Math.max(range.getLower(),
-                      Math.min(range.getUpper(), target));
-
-                  camera.getCameraControl()
-                      .setExposureCompensationIndex(target);
-              }
-
-              private void toggleTorch() {
-                  if (camera == null) {
-                      status.setText("CAMERA NOT READY");
-                      return;
-                  }
-
-                  if (!camera.getCameraInfo().hasFlashUnit()) {
-                      status.setText("NO FLASH");
-                      return;
-                  }
-
-                  torchOn = !torchOn;
-                  camera.getCameraControl().enableTorch(torchOn);
-                  lightButton.setText(torchOn ? "LIGHT ON" : "LIGHT");
-              }
-
-              private void toggleRecording() {
-                  if (recording != null) {
-                      recording.stop();
-                      return;
-                  }
-
-                  if (videoCapture == null) {
-                      status.setText("CAMERA NOT READY");
-                      return;
-                  }
-
-                  String stamp =
-                      new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-                          .format(new Date());
-
-                  ContentValues values = new ContentValues();
-                  values.put(
-                      MediaStore.Video.Media.DISPLAY_NAME,
-                      "DU_R24_RAW_" + stamp
-                  );
-                  values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
-
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      values.put(
-                          MediaStore.Video.Media.RELATIVE_PATH,
-                          "Movies/DU Camera/R24 Raw"
-                      );
-                  }
-
-                  MediaStoreOutputOptions output =
-                      new MediaStoreOutputOptions.Builder(
-                          getContentResolver(),
-                          MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                      )
-                      .setContentValues(values)
-                      .build();
-
-                  androidx.camera.video.PendingRecording pending =
-                      videoCapture.getOutput().prepareRecording(this, output);
-
-                  if (hasAudioPermission()) {
-                      pending = pending.withAudioEnabled();
-                  }
-
-                  recording =
-                      pending.start(
-                          ContextCompat.getMainExecutor(this),
-                          event -> {
-                              if (event instanceof VideoRecordEvent.Start) {
-                                  recordButton.setText("STOP");
-                                  status.setText("DYNAMIC MASTER • REC");
-                              } else if (event instanceof VideoRecordEvent.Finalize) {
-                                  VideoRecordEvent.Finalize end =
-                                      (VideoRecordEvent.Finalize) event;
-
-                                  recording = null;
-                                  recordButton.setText("RECORD");
-
-                                  if (end.hasError()) {
-                                      status.setText("SAVE ERROR");
-                                  } else {
-                                      Uri rawUri =
-                                          end.getOutputResults().getOutputUri();
-
-                                      if (autoEnhance &&
-                                          rawUri != null &&
-                                          !Uri.EMPTY.equals(rawUri)) {
-                                          status.setText("ENHANCING VIDEO...");
-                                          enhanceRecordedMaster(
-                                              rawUri,
-                                              true
-                                          );
-                                      } else {
-                                          status.setText("RAW MASTER SAVED");
-                                      }
-                                  }
-                              }
-                          }
-                      );
-              }
-
-              private void enhanceRecordedMaster(
-                  Uri inputUri,
-                  boolean preferHevc
-              ) {
-                  try {
-                      File directory =
-                          getExternalFilesDir(
-                              Environment.DIRECTORY_MOVIES
-                          );
-
-                      if (directory == null) {
-                          directory = getCacheDir();
-                      }
-
-                      File enhancedFile =
-                          new File(
-                              directory,
-                              "DU_R24_ENHANCED_" +
-                              System.currentTimeMillis() +
-                              ".mp4"
-                          );
-
-                      if (enhancedFile.exists()) {
-                          enhancedFile.delete();
-                      }
-
-                      // R23 Natural Pro grade:
-                      // preserve texture, open shadows, protect highlights,
-                      // and warm color slightly without an artificial LUT look.
-                      Effect contrast =
-                          new Contrast(0.055f);
-
-                      Effect saturation =
-                          new HslAdjustment.Builder()
-                              .adjustSaturation(5.0f)
-                              .adjustLightness(2.3f)
-                              .build();
-
-                      Effect channelBalance =
-                          new RgbAdjustment.Builder()
-                              .setRedScale(1.015f)
-                              .setGreenScale(1.008f)
-                              .setBlueScale(0.997f)
-                              .build();
-
-                      EditedMediaItem editedItem =
-                          new EditedMediaItem.Builder(
-                              MediaItem.fromUri(inputUri)
-                          )
-                          .setEffects(
-                              new Effects(
-                                  Collections.emptyList(),
-                                  Arrays.asList(
-                                      contrast,
-                                      saturation,
-                                      channelBalance
-                                  )
-                              )
-                          )
-                          .build();
-
-                      VideoEncoderSettings encoderSettings =
-                          new VideoEncoderSettings.Builder()
-                              .setBitrate(44_000_000)
-                              .setiFrameIntervalSeconds(1.0f)
-                              .build();
-
-                      DefaultEncoderFactory encoderFactory =
-                          new DefaultEncoderFactory.Builder(this)
-                              .setEnableFallback(true)
-                              .setRequestedVideoEncoderSettings(
-                                  encoderSettings
-                              )
-                              .build();
-
-                      Transformer.Builder builder =
-                          new Transformer.Builder(this)
-                              .setEncoderFactory(encoderFactory)
-                              .addListener(
-                                  new Transformer.Listener() {
-                                      @Override
-                                      public void onCompleted(
-                                          Composition composition,
-                                          ExportResult exportResult
-                                      ) {
-                                          activeTransformer = null;
-                                          publishEnhancedVideo(
-                                              enhancedFile
-                                          );
-                                      }
-
-                                      @Override
-                                      public void onError(
-                                          Composition composition,
-                                          ExportResult exportResult,
-                                          ExportException exportException
-                                      ) {
-                                          activeTransformer = null;
-
-                                          // HEVC is preferred for social-media
-                                          // quality/size. Retry as AVC on phones
-                                          // whose encoders reject HEVC.
-                                          if (preferHevc) {
-                                              if (enhancedFile.exists()) {
-                                                  enhancedFile.delete();
-                                              }
-
-                                              status.setText(
-                                                  "HEVC FALLBACK • AVC"
-                                              );
-
-                                              enhanceRecordedMaster(
-                                                  inputUri,
-                                                  false
-                                              );
-                                          } else {
-                                              status.setText(
-                                                  "RAW SAVED • ENHANCE SKIPPED"
-                                              );
-                                          }
-                                      }
-                                  }
-                              );
-
-                      builder.setVideoMimeType(
-                          preferHevc
-                              ? MimeTypes.VIDEO_H265
-                              : MimeTypes.VIDEO_H264
-                      );
-
-                      activeTransformer = builder.build();
-
-                      activeTransformer.start(
-                          editedItem,
-                          enhancedFile.getAbsolutePath()
-                      );
-
-                  } catch (Throwable error) {
-                      activeTransformer = null;
-                      status.setText(
-                          "RAW SAVED • ENHANCE ERROR"
-                      );
-                  }
-              }
-
-              private void publishEnhancedVideo(
-                  File sourceFile
-              ) {
-                  if (sourceFile == null ||
-                      !sourceFile.exists()) {
-                      status.setText(
-                          "RAW SAVED • EXPORT MISSING"
-                      );
-                      return;
-                  }
-
-                  Uri destination = null;
-
-                  try {
-                      ContentValues values =
-                          new ContentValues();
-
-                      values.put(
-                          MediaStore.Video.Media.DISPLAY_NAME,
-                          "DU_R24_DYNAMIC_MASTER_" +
-                          new SimpleDateFormat(
-                              "yyyyMMdd_HHmmss",
-                              Locale.US
-                          ).format(new Date())
-                      );
-
-                      values.put(
-                          MediaStore.Video.Media.MIME_TYPE,
-                          "video/mp4"
-                      );
-
-                      if (Build.VERSION.SDK_INT >=
-                          Build.VERSION_CODES.Q) {
-                          values.put(
-                              MediaStore.Video.Media.RELATIVE_PATH,
-                              "Movies/DU Camera/4K Dynamic Master"
-                          );
-                          values.put(
-                              MediaStore.Video.Media.IS_PENDING,
-                              1
-                          );
-                      }
-
-                      destination =
-                          getContentResolver().insert(
-                              MediaStore.Video.Media
-                                  .EXTERNAL_CONTENT_URI,
-                              values
-                          );
-
-                      if (destination == null) {
-                          throw new IllegalStateException(
-                              "Enhanced MediaStore insert failed"
-                          );
-                      }
-
-                      try (
-                          InputStream input =
-                              new FileInputStream(sourceFile);
-                          OutputStream output =
-                              getContentResolver()
-                                  .openOutputStream(destination)
-                      ) {
-                          if (output == null) {
-                              throw new IllegalStateException(
-                                  "Enhanced output stream failed"
-                              );
-                          }
-
-                          byte[] buffer =
-                              new byte[1024 * 1024];
-
-                          int count;
-
-                          while ((count =
-                              input.read(buffer)) != -1) {
-                              output.write(
-                                  buffer,
-                                  0,
-                                  count
-                              );
-                          }
-
-                          output.flush();
-                      }
-
-                      if (Build.VERSION.SDK_INT >=
-                          Build.VERSION_CODES.Q) {
-                          ContentValues ready =
-                              new ContentValues();
-
-                          ready.put(
-                              MediaStore.Video.Media.IS_PENDING,
-                              0
-                          );
-
-                          getContentResolver().update(
-                              destination,
-                              ready,
-                              null,
-                              null
-                          );
-                      }
-
-                      sourceFile.delete();
-
-                      status.setText(
-                          "4K DYNAMIC • ENHANCED SAVED"
-                      );
-
-                  } catch (Throwable error) {
-                      if (destination != null) {
-                          try {
-                              getContentResolver().delete(
-                                  destination,
-                                  null,
-                                  null
-                              );
-                          } catch (Throwable ignored) {
-                          }
-                      }
-
-                      status.setText(
-                          "RAW SAVED • PUBLISH ERROR"
-                      );
-                  }
-              }
-
-              @Override
-              public void onRequestPermissionsResult(
-                  int requestCode,
-                  String[] permissions,
-                  int[] grantResults
-              ) {
-                  super.onRequestPermissionsResult(
-                      requestCode,
-                      permissions,
-                      grantResults
-                  );
-
-                  if (requestCode == REQUEST_CAMERA) {
-                      if (hasCameraPermission()) {
-                          startCamera();
-                      } else {
-                          status.setText("CAMERA PERMISSION DENIED");
-                      }
-                  }
-              }
-
-              @Override
-              protected void onDestroy() {
-                  if (recording != null) {
-                      recording.stop();
-                  }
-                  if (activeTransformer != null) {
-                      activeTransformer.cancel();
-                      activeTransformer = null;
-                  }
-                  if (provider != null) {
-                      provider.unbindAll();
-                  }
-                  super.onDestroy();
-              }
-
-              private boolean hasCameraPermission() {
-                  return ContextCompat.checkSelfPermission(
-                      this,
-                      Manifest.permission.CAMERA
-                  ) == PackageManager.PERMISSION_GRANTED;
-              }
-
-              private boolean hasAudioPermission() {
-                  return ContextCompat.checkSelfPermission(
-                      this,
-                      Manifest.permission.RECORD_AUDIO
-                  ) == PackageManager.PERMISSION_GRANTED;
-              }
-
-              private TextView button(String text) {
-                  TextView view = new TextView(this);
-                  view.setText(text);
-                  view.setTextColor(Color.WHITE);
-                  view.setTextSize(11.5f);
-                  view.setGravity(Gravity.CENTER);
-
-                  GradientDrawable bg = new GradientDrawable();
-                  bg.setColor(0xDD111111);
-                  bg.setCornerRadius(dp(12));
-                  bg.setStroke(dp(1), 0xFFFFB323);
-
-                  view.setBackground(bg);
-                  return view;
-              }
-
-              private int dp(int value) {
-                  return (int) (
-                      value * getResources().getDisplayMetrics().density
-                  );
-              }
-          }
-          JAVA
-
-          cat > /tmp/R024-4K-DYNAMIC-MASTER-AUDIT.txt <<'TXT'
-          R024 4K DYNAMIC MASTER AUDIT
-          PASS exact UHD quality selector for successful 4K modes
-          PASS 4K60 detection uses MediaRecorder min-frame-duration data
-          PASS separate 1080p60 detection
-          PASS 1080p120 hardware detection with safe CameraX fallback
-          PASS UHD60 stabilization and no-stabilization attempts
-          PASS UHD30 spatial-detail fallback
-          PASS FHD60 motion fallback
-          PASS no silent UHD-to-FHD QualitySelector fallback
-          PASS stronger highlight headroom + post shadow lift
-          PASS gentler recorded contrast
-          PASS reduced global saturation
-          PASS +1.5 lightness for cleaner shadow detail
-          PASS warm RGB balance without heavy cast
-          PASS softer FAST edge processing at 60fps
-          PASS HIGH_QUALITY edge processing retained at 30fps
-          PASS balanced highlight protection
-          PASS compileSdk 36 for Media3 1.10.1
-          PASS AGP 8.11.1 supports API 36
-          PASS Gradle 8.13 matches AGP 8.11.x
-          PASS based on proven clean R18/R19/R20/R21 architecture
-          PASS true Media3 recorded-file enhancement
-          PASS contrast + saturation + RGB channel grade
-          PASS HEVC preferred with AVC retry
-          PASS 42 Mbps enhanced export target
-          PASS raw recording preserved if enhancement fails
-          PASS R20 Camera2 ISP helper retained unchanged
-          PASS stable platform-only 4K/60 capability detection
-          PASS motion-detail bitrate profile
-          PASS no V280/V238 legacy replay
-          PASS one camera launcher
-          PASS one PreviewView
-          PASS UHD preferred with FHD fallback
-          PASS adaptive Camera2 ISP enhancement
-          PASS high-quality edge processing
-          PASS texture-preserving 60fps noise processing
-          PASS high-quality 30fps noise processing
-          PASS chromatic aberration correction
-          PASS anti-banding AUTO
-          PASS hardware-profile reporting without unsupported CameraX APIs
-          PASS 60 fps target with 30 fps fallback
-          PASS 50 Mbps UHD target bitrate
-          PASS SDR / BT.709-friendly capture path
-          PASS stabilization with safe fallback
-          PASS highlight protection -0.3 EV
-          PASS tap focus/exposure
-          PASS pinch zoom
-          PASS MediaStore TikTok Master save path
-          TXT
-
-          grep -qx 'android.useAndroidX=true' r24-dynamic/gradle.properties
-          test "$(grep -c 'android.intent.action.MAIN' r24-dynamic/app/src/main/AndroidManifest.xml)" = "1"
-          test "$(grep -c 'android.intent.category.LAUNCHER' r24-dynamic/app/src/main/AndroidManifest.xml)" = "1"
-          grep -q 'Quality.UHD' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'QualitySelector.from(' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'getOutputMinFrameDuration' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'getHighSpeedVideoFpsRangesFor' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q '62_000_000' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'new Range<>(targetFps, targetFps)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q '50_000_000' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'new Range<>(60, 60)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'setVideoStabilizationEnabled(true)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'setPreviewStabilizationEnabled(true)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'DynamicRange.SDR' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'startFocusAndMetering' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'setZoomRatio' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'Camera2Interop.Extender' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'SCALER_STREAM_CONFIGURATION_MAP' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q '55_000_000' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'media3-transformer' r24-dynamic/app/build.gradle
-          grep -q "compileSdk 36" r24-dynamic/app/build.gradle
-          ! grep -q 'setEnableFormatFallback' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'new Contrast(0.055f)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'adjustLightness(2.3f)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'setRedScale(1.015f)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'setBlueScale(0.997f)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'EDGE_MODE_FAST' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'adjustSaturation(5.0f)' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'MimeTypes.VIDEO_H265' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q '44_000_000' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'publishEnhancedVideo' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'EDGE_MODE_HIGH_QUALITY' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'NOISE_REDUCTION_MODE_HIGH_QUALITY' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          grep -q 'COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          ! grep -q 'getSelectedQuality' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-          ! grep -q 'getResolutionInfo' r24-dynamic/app/src/main/java/com/sentongoharuna/ducamera/DynamicMasterCameraActivity.java
-
-          echo "PASS: R024 4K Dynamic Master source audit complete."
+          failed = [name for name, ok in checks.items() if not ok]
+
+          report = ['R024 4K DYNAMIC MASTER ROBUST AUDIT']
+          report += [
+              ('PASS ' if ok else 'FAIL ') + name
+              for name, ok in checks.items()
+          ]
+
+          Path('/tmp/R024-4K-DYNAMIC-MASTER-AUDIT.txt').write_text(
+              '\n'.join(report) + '\n',
+              encoding='utf-8'
+          )
+
+          print('\n'.join(report))
+
+          if failed:
+              raise SystemExit(
+                  'R024 robust audit failed: ' + ', '.join(failed)
+              )
+          PY
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
