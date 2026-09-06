@@ -27,6 +27,12 @@ jobs:
           mkdir -p r18-clean/app/src/main/java/com/sentongoharuna/ducamera
           mkdir -p r18-clean/app/src/main/res/values
 
+          cat > r18-clean/gradle.properties <<'PROPS'
+          android.useAndroidX=true
+          android.enableJetifier=false
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          PROPS
+
           cat > r18-clean/settings.gradle <<'GRADLE'
           pluginManagement {
               repositories {
@@ -61,12 +67,12 @@ jobs:
 
           android {
               namespace 'com.sentongoharuna.ducamera'
-              compileSdk 36
+              compileSdk 35
 
               defaultConfig {
                   applicationId 'com.sentongoharuna.ducamera.r018cleancore'
                   minSdk 24
-                  targetSdk 36
+                  targetSdk 35
                   versionCode 400000029
                   versionName '1.0-r018-clean-core'
               }
@@ -529,6 +535,7 @@ jobs:
           cat > /tmp/R018-CLEAN-CORE-AUDIT.txt <<'TXT'
           R018 CLEAN CORE AUDIT
           PASS new project built from scratch
+          PASS AndroidX enabled
           PASS no V280 replay
           PASS no V238 shell
           PASS no GeneralHub launcher
@@ -541,6 +548,7 @@ jobs:
           TXT
 
           test ! -e r18-clean/v172-source
+          grep -qx 'android.useAndroidX=true' r18-clean/gradle.properties
           ! grep -R "GeneralHubActivity" r18-clean/app/src/main || exit 1
           ! grep -R "CleanHudProvider" r18-clean/app/src/main || exit 1
           test "$(grep -R 'android.intent.action.MAIN' -c r18-clean/app/src/main/AndroidManifest.xml)" = "1"
@@ -561,7 +569,7 @@ jobs:
 
       - name: Install Android platform
         shell: bash
-        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
