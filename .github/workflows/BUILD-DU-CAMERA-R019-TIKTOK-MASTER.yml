@@ -530,7 +530,7 @@ jobs:
                       lightButton.setText("LIGHT");
                       applyHighlightProtection();
 
-                      String quality = qualityName(candidateVideo.getSelectedQuality());
+                      String quality = preferUhd ? "4K PREF" : "1080 PREF";
                       String fps = target60 ? "60 TARGET" : "30";
                       String stab = stabilization ? "STAB" : "NO STAB";
                       status.setText(quality + " • " + fps + " • " + stab);
@@ -550,14 +550,6 @@ jobs:
                           status.setText("BIND ERROR • TAP");
                       }
                   }
-              }
-
-              private String qualityName(Quality quality) {
-                  if (Quality.UHD.equals(quality)) return "4K";
-                  if (Quality.FHD.equals(quality)) return "1080p";
-                  if (Quality.HD.equals(quality)) return "720p";
-                  if (Quality.SD.equals(quality)) return "SD";
-                  return "HQ";
               }
 
               private void applyHighlightProtection() {
@@ -768,6 +760,7 @@ jobs:
           grep -q 'DynamicRange.SDR' r19-master/app/src/main/java/com/sentongoharuna/ducamera/MasterCameraActivity.java
           grep -q 'startFocusAndMetering' r19-master/app/src/main/java/com/sentongoharuna/ducamera/MasterCameraActivity.java
           grep -q 'setZoomRatio' r19-master/app/src/main/java/com/sentongoharuna/ducamera/MasterCameraActivity.java
+          ! grep -q 'getSelectedQuality' r19-master/app/src/main/java/com/sentongoharuna/ducamera/MasterCameraActivity.java
 
           echo "PASS: R019 TikTok Master source audit complete."
 
