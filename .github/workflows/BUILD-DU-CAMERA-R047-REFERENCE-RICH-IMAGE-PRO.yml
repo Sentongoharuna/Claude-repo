@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-    - '.github/workflows/BUILD-DU-CAMERA-R045-UI-PRO-PRECISION-TIMELINE.yml'
+    - '.github/workflows/BUILD-DU-CAMERA-R047-REFERENCE-RICH-IMAGE-PRO.yml'
 
 permissions:
   contents: read
@@ -287,7 +287,7 @@ jobs:
 
             // UI-only precision recording timeline. Does not touch the R45 capture engine.
             private TextView precisionTimeline;
-            private Button aspectButton;
+            private TextView aspectButton;
             private boolean aspectNineTen = true;
             private Handler precisionHandler = new Handler(Looper.getMainLooper());
             private long recordingStartNanos = 0L;
@@ -367,13 +367,6 @@ jobs:
                 masterLp.topMargin = dp(16);
                 root.addView(master, masterLp);
 
-                TextView aspect = button("9:16");
-                FrameLayout.LayoutParams aspectLp =
-                    new FrameLayout.LayoutParams(dp(82), dp(42), Gravity.TOP | Gravity.END);
-                aspectLp.rightMargin = dp(12);
-                aspectLp.topMargin = dp(16);
-                root.addView(aspect, aspectLp);
-
                 // Clean precision recorder timecode: digits only, no panel, no progress line.
                 precisionTimeline = new TextView(this);
                 precisionTimeline.setText("0000:00:00:000:000:000");
@@ -400,8 +393,8 @@ jobs:
 
                 aspectButton = button("9:10");
                 FrameLayout.LayoutParams aspectLp =
-                    new FrameLayout.LayoutParams(dp(72), dp(40), Gravity.TOP | Gravity.END);
-                aspectLp.topMargin = dp(10);
+                    new FrameLayout.LayoutParams(dp(82), dp(42), Gravity.TOP | Gravity.END);
+                aspectLp.topMargin = dp(16);
                 aspectLp.rightMargin = dp(12);
                 root.addView(aspectButton, aspectLp);
                 aspectButton.setOnClickListener(v -> {
@@ -507,6 +500,7 @@ jobs:
                 lightButton.setOnClickListener(v -> toggleTorch());
 
                 setContentView(root);
+                applyPreviewAspectGuide();
             }
 
             private LinearLayout.LayoutParams railLp() {
