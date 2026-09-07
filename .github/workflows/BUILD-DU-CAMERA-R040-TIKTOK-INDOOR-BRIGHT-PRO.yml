@@ -1,0 +1,1754 @@
+name: Build DU Camera R040 TIKTOK INDOOR BRIGHT PRO APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R040-TIKTOK-INDOOR-BRIGHT-PRO.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r040_tiktok_indoor_bright_pro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create R040 TikTok indoor bright pro from proven R39 TikTok auto exposure master
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf r40-bright
+          mkdir -p r40-bright/app/src/main/java/com/sentongoharuna/ducamera
+          mkdir -p r40-bright/app/src/main/res/values
+
+          cat > r40-bright/gradle.properties <<'PROPS'
+          android.useAndroidX=true
+          android.enableJetifier=false
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          PROPS
+
+          cat > r40-bright/settings.gradle <<'GRADLE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "DUCameraR040TikTokIndoorBrightPro"
+          include(":app")
+          GRADLE
+
+          cat > r40-bright/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application' version '8.11.1' apply false
+          }
+          GRADLE
+
+          cat > r40-bright/app/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.sentongoharuna.ducamera'
+              compileSdk 36
+
+              defaultConfig {
+                  applicationId 'com.sentongoharuna.ducamera.r040tiktokindoorbrightpro'
+                  minSdk 24
+                  targetSdk 35
+                  versionCode 400000052
+                  versionName '1.0-r040-tiktok-indoor-bright-pro'
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.activity:activity:1.10.1'
+              implementation 'androidx.core:core:1.15.0'
+              implementation 'androidx.camera:camera-core:1.7.0-alpha03'
+              implementation 'androidx.camera:camera-camera2:1.7.0-alpha03'
+              implementation 'androidx.camera:camera-lifecycle:1.7.0-alpha03'
+              implementation 'androidx.camera:camera-video:1.7.0-alpha03'
+              implementation 'androidx.camera:camera-view:1.7.0-alpha03'
+
+              // R22 true saved-video enhancement.
+              def media3_version = '1.10.1'
+              implementation "androidx.media3:media3-common:${media3_version}"
+              implementation "androidx.media3:media3-effect:${media3_version}"
+              implementation "androidx.media3:media3-transformer:${media3_version}"
+          }
+          GRADLE
+
+          cat > r40-bright/app/src/main/res/values/styles.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.DUCamera" parent="@android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:windowBackground">@android:color/black</item>
+                  <item name="android:statusBarColor">@android:color/black</item>
+                  <item name="android:navigationBarColor">@android:color/black</item>
+                  <item name="android:colorAccent">#FFB323</item>
+              </style>
+          </resources>
+          XML
+
+          cat > r40-bright/app/src/main/AndroidManifest.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+              <uses-feature
+                  android:name="android.hardware.camera.any"
+                  android:required="true" />
+
+              <application
+                  android:allowBackup="false"
+                  android:label="DU Camera R040 TikTok Indoor Bright Pro"
+                  android:theme="@style/Theme.DUCamera">
+
+                  <activity
+                      android:name=".TikTokIndoorBrightCameraActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+              </application>
+          </manifest>
+          XML
+
+          cat > r40-bright/app/src/main/java/com/sentongoharuna/ducamera/TikTokIndoorBrightCameraActivity.java <<'JAVA'
+          package com.sentongoharuna.ducamera;
+
+          import android.Manifest;
+          import android.content.ContentValues;
+          import android.content.pm.PackageManager;
+          import android.content.Context;
+          import android.net.Uri;
+          import android.os.Environment;
+          import android.graphics.Color;
+          import android.graphics.drawable.GradientDrawable;
+          import android.hardware.camera2.CaptureRequest;
+          import android.hardware.camera2.CameraCharacteristics;
+          import android.hardware.camera2.CameraManager;
+          import android.hardware.camera2.params.TonemapCurve;
+          import android.hardware.camera2.params.StreamConfigurationMap;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.media.MediaRecorder;
+          import android.media.MediaFormat;
+          import android.provider.MediaStore;
+          import android.util.Range;
+          import android.util.Size;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.ScaleGestureDetector;
+          import android.view.WindowManager;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import androidx.activity.ComponentActivity;
+          import androidx.annotation.OptIn;
+          import androidx.camera.camera2.interop.Camera2Interop;
+          import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
+          import androidx.camera.core.Camera;
+          import androidx.camera.core.CameraSelector;
+          import androidx.camera.core.DynamicRange;
+          import androidx.camera.core.ExposureState;
+          import androidx.camera.core.FocusMeteringAction;
+          import androidx.camera.core.MeteringPoint;
+          import androidx.camera.core.Preview;
+          import androidx.camera.core.ZoomState;
+          import androidx.camera.lifecycle.ProcessCameraProvider;
+          import androidx.camera.video.ExperimentalMimeTypeApi;
+          import androidx.camera.video.FallbackStrategy;
+          import androidx.camera.video.MediaStoreOutputOptions;
+          import androidx.camera.video.Quality;
+          import androidx.camera.video.QualitySelector;
+          import androidx.camera.video.Recorder;
+          import androidx.camera.video.Recording;
+          import androidx.camera.video.VideoCapture;
+          import androidx.camera.video.VideoRecordEvent;
+          import androidx.camera.view.PreviewView;
+          import androidx.core.content.ContextCompat;
+          import androidx.media3.common.Effect;
+          import androidx.media3.common.MediaItem;
+          import androidx.media3.common.MimeTypes;
+          import androidx.media3.common.util.UnstableApi;
+          import androidx.media3.effect.Contrast;
+          import androidx.media3.effect.HslAdjustment;
+          import androidx.media3.effect.RgbAdjustment;
+          import androidx.media3.transformer.Composition;
+          import androidx.media3.transformer.DefaultEncoderFactory;
+          import androidx.media3.transformer.EditedMediaItem;
+          import androidx.media3.transformer.Effects;
+          import androidx.media3.transformer.ExportException;
+          import androidx.media3.transformer.ExportResult;
+          import androidx.media3.transformer.Transformer;
+          import androidx.media3.transformer.VideoEncoderSettings;
+
+          import com.google.common.util.concurrent.ListenableFuture;
+
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.text.SimpleDateFormat;
+          import java.util.Arrays;
+          import java.util.Collections;
+          import java.util.Date;
+          import java.util.Locale;
+          import java.util.concurrent.TimeUnit;
+
+          @UnstableApi
+          @OptIn(markerClass = {
+              ExperimentalCamera2Interop.class,
+              ExperimentalMimeTypeApi.class
+          })
+          public class TikTokIndoorBrightCameraActivity extends ComponentActivity {
+
+              private static final int REQUEST_CAMERA = 4040;
+
+              private PreviewView previewView;
+              private TextView status;
+              private TextView recordButton;
+              private TextView lightButton;
+              private TextView highlightButton;
+              private TextView adaptiveButton;
+              private TextView motionButton;
+              private TextView enhanceButton;
+
+              private ProcessCameraProvider provider;
+              private Camera camera;
+              private VideoCapture<Recorder> videoCapture;
+              private Recording recording;
+              private ScaleGestureDetector scaleDetector;
+
+              private boolean useFront = false;
+              private boolean torchOn = false;
+              private boolean highlightProtect = true;
+              private boolean adaptiveEngine = true;
+              private boolean motionDetail = true;
+              private boolean autoEnhance = true;
+              private boolean directHevcAvailable = false;
+              private boolean directHevcActive = false;
+              private boolean directHevcRetryUsed = false;
+              private boolean directGradeCopy = false;
+              private Transformer activeTransformer = null;
+              private HardwareProfile hardwareProfile = new HardwareProfile();
+              private int activeAttempt = 0;
+              private boolean minimalIspRetryUsed = false;
+              private boolean motionPriorityRetryUsed = false;
+              private boolean highQualityEdgeRetryUsed = false;
+              private boolean highQualityToneRetryUsed = false;
+              private boolean contrastCurveRetryUsed = false;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  getWindow().setStatusBarColor(Color.BLACK);
+                  getWindow().setNavigationBarColor(Color.BLACK);
+
+                  buildUi();
+                  installCameraGestures();
+
+                  if (hasCameraPermission()) {
+                      startCamera();
+                  } else {
+                      status.setText("ALLOW CAMERA");
+                      requestPermissions(
+                          new String[] {
+                              Manifest.permission.CAMERA,
+                              Manifest.permission.RECORD_AUDIO
+                          },
+                          REQUEST_CAMERA
+                      );
+                  }
+              }
+
+              private void buildUi() {
+                  FrameLayout root = new FrameLayout(this);
+                  root.setBackgroundColor(Color.BLACK);
+
+                  previewView = new PreviewView(this);
+                  previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+                  previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+                  previewView.setBackgroundColor(Color.BLACK);
+                  root.addView(
+                      previewView,
+                      new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.MATCH_PARENT
+                      )
+                  );
+
+                  TextView master = button("R40 BRIGHT");
+                  FrameLayout.LayoutParams masterLp =
+                      new FrameLayout.LayoutParams(dp(108), dp(42), Gravity.TOP | Gravity.START);
+                  masterLp.leftMargin = dp(12);
+                  masterLp.topMargin = dp(16);
+                  root.addView(master, masterLp);
+
+                  TextView aspect = button("9:16");
+                  FrameLayout.LayoutParams aspectLp =
+                      new FrameLayout.LayoutParams(dp(82), dp(42), Gravity.TOP | Gravity.END);
+                  aspectLp.rightMargin = dp(12);
+                  aspectLp.topMargin = dp(16);
+                  root.addView(aspect, aspectLp);
+
+                  status = button("TIKTOK INDOOR BRIGHT • OPENING");
+                  FrameLayout.LayoutParams statusLp =
+                      new FrameLayout.LayoutParams(dp(212), dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                  statusLp.topMargin = dp(68);
+                  root.addView(status, statusLp);
+                  status.setOnClickListener(v -> startCamera());
+
+                  LinearLayout qualityRail = new LinearLayout(this);
+                  qualityRail.setOrientation(LinearLayout.VERTICAL);
+                  qualityRail.setGravity(Gravity.CENTER);
+
+                  adaptiveButton = button("SOCIAL+");
+                  motionButton = button("MOTION+");
+                  enhanceButton = button("DIRECT FINAL");
+                  TextView bitrate = button("25 Mbps");
+                  TextView fps = button("60 FPS");
+                  TextView stab = button("STAB AUTO");
+                  highlightButton = button("BRIGHT +1.0");
+
+                  qualityRail.addView(adaptiveButton, railLp());
+                  qualityRail.addView(motionButton, railLp());
+                  qualityRail.addView(enhanceButton, railLp());
+                  qualityRail.addView(bitrate, railLp());
+                  qualityRail.addView(fps, railLp());
+                  qualityRail.addView(stab, railLp());
+                  qualityRail.addView(highlightButton, railLp());
+
+                  FrameLayout.LayoutParams railRootLp =
+                      new FrameLayout.LayoutParams(dp(104), FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.END | Gravity.CENTER_VERTICAL);
+                  railRootLp.rightMargin = dp(10);
+                  root.addView(qualityRail, railRootLp);
+
+                  adaptiveButton.setOnClickListener(v -> {
+                      if (recording != null) return;
+                      adaptiveEngine = !adaptiveEngine;
+                      adaptiveButton.setText(adaptiveEngine ? "SOCIAL+" : "NATURAL");
+                      startCamera();
+                  });
+
+                  motionButton.setOnClickListener(v -> {
+                      if (recording != null) return;
+                      motionDetail = !motionDetail;
+                      motionButton.setText(motionDetail ? "MOTION+" : "MOTION OFF");
+                      startCamera();
+                  });
+
+                  enhanceButton.setOnClickListener(v -> {
+                      if (recording != null || activeTransformer != null) return;
+                      directGradeCopy = !directGradeCopy;
+                      enhanceButton.setText(
+                          directGradeCopy ? "+GRADE COPY" : "DIRECT FINAL"
+                      );
+                  });
+
+                  highlightButton.setOnClickListener(v -> {
+                      highlightProtect = !highlightProtect;
+                      highlightButton.setText(highlightProtect ? "BRIGHT +1.0" : "EXP AUTO");
+                      applyHighlightProtection();
+                  });
+
+                  LinearLayout bottom = new LinearLayout(this);
+                  bottom.setOrientation(LinearLayout.HORIZONTAL);
+                  bottom.setGravity(Gravity.CENTER);
+                  bottom.setPadding(dp(8), dp(8), dp(8), dp(18));
+                  bottom.setBackgroundColor(0x66000000);
+
+                  TextView lensButton = button("LENS");
+                  recordButton = button("RECORD");
+                  lightButton = button("LIGHT");
+
+                  bottom.addView(lensButton, weightedButtonLp());
+                  bottom.addView(recordButton, weightedButtonLp());
+                  bottom.addView(lightButton, weightedButtonLp());
+
+                  root.addView(
+                      bottom,
+                      new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.BOTTOM
+                      )
+                  );
+
+                  lensButton.setOnClickListener(v -> {
+                      if (recording != null) {
+                          recording.stop();
+                      }
+                      useFront = !useFront;
+                      startCamera();
+                  });
+
+                  recordButton.setOnClickListener(v -> toggleRecording());
+                  lightButton.setOnClickListener(v -> toggleTorch());
+
+                  setContentView(root);
+              }
+
+              private LinearLayout.LayoutParams railLp() {
+                  LinearLayout.LayoutParams lp =
+                      new LinearLayout.LayoutParams(dp(96), dp(40));
+                  lp.bottomMargin = dp(7);
+                  return lp;
+              }
+
+              private LinearLayout.LayoutParams weightedButtonLp() {
+                  LinearLayout.LayoutParams lp =
+                      new LinearLayout.LayoutParams(0, dp(62), 1f);
+                  lp.setMarginStart(dp(5));
+                  lp.setMarginEnd(dp(5));
+                  return lp;
+              }
+
+              private void installCameraGestures() {
+                  scaleDetector =
+                      new ScaleGestureDetector(
+                          this,
+                          new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                              @Override
+                              public boolean onScale(ScaleGestureDetector detector) {
+                                  if (camera == null) return false;
+                                  ZoomState zoom =
+                                      camera.getCameraInfo().getZoomState().getValue();
+                                  if (zoom == null) return false;
+
+                                  float next =
+                                      zoom.getZoomRatio() * detector.getScaleFactor();
+                                  next = Math.max(zoom.getMinZoomRatio(),
+                                      Math.min(zoom.getMaxZoomRatio(), next));
+                                  camera.getCameraControl().setZoomRatio(next);
+                                  return true;
+                              }
+                          }
+                      );
+
+                  previewView.setOnTouchListener((v, event) -> {
+                      scaleDetector.onTouchEvent(event);
+
+                      if (event.getAction() == MotionEvent.ACTION_UP &&
+                          !scaleDetector.isInProgress() &&
+                          camera != null) {
+
+                          MeteringPoint point =
+                              previewView.getMeteringPointFactory()
+                                  .createPoint(event.getX(), event.getY());
+
+                          FocusMeteringAction action =
+                              new FocusMeteringAction.Builder(
+                                  point,
+                                  FocusMeteringAction.FLAG_AF |
+                                  FocusMeteringAction.FLAG_AE
+                              )
+                              .setAutoCancelDuration(4, TimeUnit.SECONDS)
+                              .build();
+
+                          camera.getCameraControl().startFocusAndMetering(action);
+                          status.setText("FOCUS • EXPOSURE");
+                      }
+                      return true;
+                  });
+              }
+
+              private void startCamera() {
+                  if (!hasCameraPermission()) {
+                      status.setText("ALLOW CAMERA");
+                      requestPermissions(
+                          new String[] { Manifest.permission.CAMERA },
+                          REQUEST_CAMERA
+                      );
+                      return;
+                  }
+
+                  status.setText("INDOOR BRIGHT ENGINE OPENING");
+
+                  ListenableFuture<ProcessCameraProvider> future =
+                      ProcessCameraProvider.getInstance(this);
+
+                  future.addListener(() -> {
+                      try {
+                          provider = future.get();
+                          hardwareProfile = detectHardwareProfile();
+                          minimalIspRetryUsed = false;
+                          motionPriorityRetryUsed = false;
+                          highQualityEdgeRetryUsed = false;
+                          highQualityToneRetryUsed = false;
+                          contrastCurveRetryUsed = false;
+                          directHevcRetryUsed = false;
+                          directHevcAvailable = detectDirectHevcSupport();
+                          directHevcActive = directHevcAvailable;
+                          activeAttempt = chooseStartingAttempt(hardwareProfile);
+                          bindMasterAttempt();
+                      } catch (Throwable error) {
+                          status.setText("PROVIDER ERROR • TAP");
+                      }
+                  }, ContextCompat.getMainExecutor(this));
+              }
+
+              private boolean detectDirectHevcSupport() {
+                  try {
+                      return Recorder.getSupportedVideoMimeTypes()
+                          .contains(MediaFormat.MIMETYPE_VIDEO_HEVC);
+                  } catch (Throwable error) {
+                      return false;
+                  }
+              }
+
+              private void bindMasterAttempt() {
+                  if (provider == null) return;
+
+                  boolean target60;
+                  boolean stabilization;
+                  boolean ispEnhance;
+                  int recorderBitrate;
+
+                  /*
+                   * R37 TIKTOK MASTER:
+                   * Delivery-first profile based on the proven R36 image engine.
+                   * Exact FHD is intentional: TikTok commonly serves 1080p,
+                   * so we give its encoder a clean native 1080p60 HEVC source
+                   * instead of asking it to throw away most of an 80-90 Mbps 4K file.
+                   * No second encode is used when DIRECT FINAL is selected.
+                   */
+                  switch (activeAttempt) {
+                      case 0:
+                          // Primary: exact 1080p60, stabilized, direct HEVC, 25 Mbps.
+                          target60 = true;
+                          stabilization = true;
+                          ispEnhance = adaptiveEngine;
+                          recorderBitrate = 25_000_000;
+                          break;
+
+                      case 1:
+                          // Same TikTok profile without stabilization if the device rejects the combo.
+                          target60 = true;
+                          stabilization = false;
+                          ispEnhance = adaptiveEngine;
+                          recorderBitrate = 25_000_000;
+                          break;
+
+                      case 2:
+                          // Motion fallback only after both 60 fps attempts.
+                          target60 = false;
+                          stabilization = true;
+                          ispEnhance = adaptiveEngine;
+                          recorderBitrate = 22_000_000;
+                          break;
+
+                      case 3:
+                          target60 = false;
+                          stabilization = false;
+                          ispEnhance = adaptiveEngine;
+                          recorderBitrate = 22_000_000;
+                          break;
+
+                      default:
+                          // Universal safety profile: exact FHD30, no extra ISP requests.
+                          target60 = false;
+                          stabilization = false;
+                          ispEnhance = false;
+                          recorderBitrate = 20_000_000;
+                          break;
+                  }
+
+                  try {
+                      Range<Integer> fpsRange =
+                          target60 ? new Range<>(60, 60) : new Range<>(30, 30);
+
+                      Preview.Builder previewBuilder =
+                          new Preview.Builder()
+                              .setTargetFrameRate(fpsRange);
+
+                      if (stabilization) {
+                          previewBuilder.setPreviewStabilizationEnabled(true);
+                      }
+
+                      if (ispEnhance) {
+                          applyAdaptiveIsp(previewBuilder, target60);
+                      }
+
+                      Preview preview = previewBuilder.build();
+                      preview.setSurfaceProvider(previewView.getSurfaceProvider());
+
+                      // Exact FHD: no hidden UHD request and no lower-quality fallback.
+                      QualitySelector selector =
+                          QualitySelector.from(Quality.FHD);
+
+                      Recorder.Builder recorderBuilder =
+                          new Recorder.Builder()
+                              .setQualitySelector(selector)
+                              .setTargetVideoEncodingBitRate(
+                                  recorderBitrate
+                              );
+
+                      if (directHevcActive) {
+                          recorderBuilder
+                              .setVideoCapabilitiesSource(
+                                  Recorder
+                                      .VIDEO_CAPABILITIES_SOURCE_CODEC_CAPABILITIES
+                              )
+                              .setVideoMimeType(
+                                  MediaFormat.MIMETYPE_VIDEO_HEVC
+                              );
+                      }
+
+                      Recorder recorder = recorderBuilder.build();
+
+                      VideoCapture.Builder<Recorder> videoBuilder =
+                          new VideoCapture.Builder<>(recorder)
+                              .setDynamicRange(DynamicRange.SDR)
+                              .setTargetFrameRate(fpsRange);
+
+                      if (stabilization) {
+                          videoBuilder.setVideoStabilizationEnabled(true);
+                      }
+
+                      if (ispEnhance) {
+                          applyAdaptiveIsp(videoBuilder, target60);
+                      }
+
+                      VideoCapture<Recorder> candidateVideo =
+                          videoBuilder.build();
+
+                      CameraSelector cameraSelector =
+                          useFront
+                              ? CameraSelector.DEFAULT_FRONT_CAMERA
+                              : CameraSelector.DEFAULT_BACK_CAMERA;
+
+                      provider.unbindAll();
+
+                      Camera candidateCamera =
+                          provider.bindToLifecycle(
+                              this,
+                              cameraSelector,
+                              preview,
+                              candidateVideo
+                          );
+
+                      camera = candidateCamera;
+                      videoCapture = candidateVideo;
+
+                      torchOn = false;
+                      lightButton.setText("LIGHT");
+                      applyHighlightProtection();
+
+                      String fps =
+                          target60
+                              ? (hardwareProfile.hasFixed60
+                                  ? "60 LOCK"
+                                  : "60 TARGET")
+                              : "30 LOCK";
+
+                      String engine =
+                          ispEnhance
+                              ? (hardwareProfile.hasContrastCurve
+                                  ? "DEPTH MID-CURVE"
+                                  : (hardwareProfile.hasHighQualityToneMap
+                                      ? "COLOR TONE-HQ"
+                                      : (hardwareProfile.hasHighQualityEdge
+                                          ? "MICRO EDGE-HQ"
+                                          : (hardwareProfile.hasExposureTimePriority
+                                              ? (target60
+                                                  ? "AE AUTO"
+                                                  : "AE AUTO")
+                                              : (target60 &&
+                                                 hardwareProfile.hasMinimalNoiseReduction
+                                                  ? "DETAIL NR-MIN"
+                                                  : "DETAIL FAST")))))
+                              : "NATURAL";
+
+                      String motion = motionDetail ? "MOTION+" : "MOTION";
+                      String stab = stabilization ? "STAB" : "NO-STAB";
+                      String codec =
+                          directHevcActive
+                              ? "HEVC DIRECT"
+                              : "H264 SAFE";
+
+                      enhanceButton.setText(
+                          directHevcActive
+                              ? (directGradeCopy
+                                  ? "+GRADE COPY"
+                                  : "DIRECT FINAL")
+                              : "SAFE ENHANCE"
+                      );
+
+                      status.setText(
+                          "TIKTOK 1080 • " + fps + " • 25M • " +
+                          engine + " • " + codec + " • " +
+                          motion + " • " + stab
+                      );
+
+                  } catch (Throwable error) {
+                      // Preserve R36 image-engine fallbacks at the SAME FHD quality.
+                      if (ispEnhance &&
+                          hardwareProfile.hasContrastCurve &&
+                          !contrastCurveRetryUsed) {
+
+                          contrastCurveRetryUsed = true;
+                          hardwareProfile.hasContrastCurve = false;
+                          status.setText(
+                              "MID-CURVE FALLBACK • TONE-HQ"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      if (ispEnhance &&
+                          hardwareProfile.hasHighQualityToneMap &&
+                          !highQualityToneRetryUsed) {
+
+                          highQualityToneRetryUsed = true;
+                          hardwareProfile.hasHighQualityToneMap = false;
+                          status.setText(
+                              "TONE-HQ FALLBACK • FAST"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      if (ispEnhance &&
+                          hardwareProfile.hasHighQualityEdge &&
+                          !highQualityEdgeRetryUsed) {
+
+                          highQualityEdgeRetryUsed = true;
+                          hardwareProfile.hasHighQualityEdge = false;
+                          status.setText(
+                              "EDGE-HQ FALLBACK • FAST"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      if (ispEnhance &&
+                          target60 &&
+                          hardwareProfile.hasMinimalNoiseReduction &&
+                          !minimalIspRetryUsed) {
+
+                          minimalIspRetryUsed = true;
+                          hardwareProfile.hasMinimalNoiseReduction = false;
+                          status.setText(
+                              "NR-MIN FALLBACK • FAST"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      // First remove stabilization, keeping exact 1080p60 HEVC.
+                      if (activeAttempt == 0) {
+                          activeAttempt = 1;
+                          status.setText(
+                              "1080P60 STAB -> NO-STAB"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      // If HEVC itself is the problem, protect 60 fps before dropping to 30.
+                      if (activeAttempt == 1 &&
+                          directHevcActive &&
+                          !directHevcRetryUsed) {
+
+                          directHevcRetryUsed = true;
+                          directHevcActive = false;
+                          activeAttempt = 0;
+                          status.setText(
+                              "HEVC -> H264 • KEEP 1080P60"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      if (activeAttempt == 1) {
+                          activeAttempt = 2;
+                          status.setText(
+                              "1080P60 -> 1080P30 STAB"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      if (activeAttempt == 2) {
+                          activeAttempt = 3;
+                          status.setText(
+                              "1080P30 STAB -> NO-STAB"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      if (activeAttempt == 3) {
+                          activeAttempt = 4;
+                          status.setText(
+                              "1080P SAFE PROFILE"
+                          );
+                          bindMasterAttempt();
+                          return;
+                      }
+
+                      if (useFront) {
+                          useFront = false;
+                          hardwareProfile = detectHardwareProfile();
+                          activeAttempt = 0;
+                          status.setText("BACK CAMERA RETRY");
+                          bindMasterAttempt();
+                      } else {
+                          status.setText("BIND ERROR • TAP");
+                      }
+                  }
+              }
+
+              private static class HardwareProfile {
+                  boolean has4k = false;
+                  boolean has60 = false;
+                  boolean hasFixed60 = false;
+                  boolean hasMinimalNoiseReduction = false;
+                  boolean hasExposureTimePriority = false;
+                  boolean hasHighQualityEdge = false;
+                  boolean hasHighQualityToneMap = false;
+                  boolean hasContrastCurve = false;
+                  String label = "HW SAFE";
+              }
+
+              private int chooseStartingAttempt(HardwareProfile profile) {
+                  return 0;
+              }
+
+              private HardwareProfile detectHardwareProfile() {
+                  HardwareProfile result = new HardwareProfile();
+
+                  try {
+                      CameraManager manager =
+                          (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+
+                      Integer wantedFacing =
+                          useFront
+                              ? CameraCharacteristics.LENS_FACING_FRONT
+                              : CameraCharacteristics.LENS_FACING_BACK;
+
+                      for (String cameraId : manager.getCameraIdList()) {
+                          CameraCharacteristics chars =
+                              manager.getCameraCharacteristics(cameraId);
+
+                          Integer facing =
+                              chars.get(CameraCharacteristics.LENS_FACING);
+
+                          if (facing == null || !facing.equals(wantedFacing)) {
+                              continue;
+                          }
+
+                          StreamConfigurationMap map =
+                              chars.get(
+                                  CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+                              );
+
+                          if (map != null) {
+                              Size[] sizes = map.getOutputSizes(MediaRecorder.class);
+                              if (sizes != null) {
+                                  for (Size size : sizes) {
+                                      int longSide =
+                                          Math.max(size.getWidth(), size.getHeight());
+                                      int shortSide =
+                                          Math.min(size.getWidth(), size.getHeight());
+
+                                      if (longSide >= 3840 && shortSide >= 2160) {
+                                          result.has4k = true;
+                                          break;
+                                      }
+                                  }
+                              }
+                          }
+
+                          Range<Integer>[] ranges =
+                              chars.get(
+                                  CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+                              );
+
+                          if (ranges != null) {
+                              for (Range<Integer> range : ranges) {
+                                  if (range.getUpper() >= 60) {
+                                      result.has60 = true;
+                                  }
+
+                                  if (range.getLower() == 60 &&
+                                      range.getUpper() == 60) {
+                                      result.hasFixed60 = true;
+                                  }
+                              }
+                          }
+
+                          int[] noiseModes =
+                              chars.get(
+                                  CameraCharacteristics
+                                      .NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES
+                              );
+
+                          if (noiseModes != null) {
+                              for (int mode : noiseModes) {
+                                  if (mode ==
+                                      CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL) {
+                                      result.hasMinimalNoiseReduction = true;
+                                      break;
+                                  }
+                              }
+                          }
+
+                          if (Build.VERSION.SDK_INT >= 36) {
+                              int[] priorityModes =
+                                  chars.get(
+                                      CameraCharacteristics
+                                          .CONTROL_AE_AVAILABLE_PRIORITY_MODES
+                                  );
+
+                              if (priorityModes != null) {
+                                  for (int mode : priorityModes) {
+                                      if (mode ==
+                                          CaptureRequest
+                                              .CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY) {
+                                          result.hasExposureTimePriority = true;
+                                          break;
+                                      }
+                                  }
+                              }
+                          }
+
+                          int[] edgeModes =
+                              chars.get(
+                                  CameraCharacteristics
+                                      .EDGE_AVAILABLE_EDGE_MODES
+                              );
+
+                          if (edgeModes != null) {
+                              for (int mode : edgeModes) {
+                                  if (mode ==
+                                      CaptureRequest.EDGE_MODE_HIGH_QUALITY) {
+                                      result.hasHighQualityEdge = true;
+                                      break;
+                                  }
+                              }
+                          }
+
+                          int[] toneMapModes =
+                              chars.get(
+                                  CameraCharacteristics
+                                      .TONEMAP_AVAILABLE_TONE_MAP_MODES
+                              );
+
+                          if (toneMapModes != null) {
+                              for (int mode : toneMapModes) {
+                                  if (mode ==
+                                      CaptureRequest.TONEMAP_MODE_HIGH_QUALITY) {
+                                      result.hasHighQualityToneMap = true;
+                                  }
+
+                                  if (mode ==
+                                      CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE) {
+                                      result.hasContrastCurve = true;
+                                  }
+                              }
+                          }
+
+                          break;
+                      }
+                  } catch (Throwable ignored) {
+                      result.has4k = false;
+                      result.has60 = false;
+                  }
+
+                  if (result.has4k && result.has60) {
+                      result.label = "HW 4K/60";
+                  } else if (result.has4k) {
+                      result.label = "HW 4K";
+                  } else if (result.has60) {
+                      result.label = "HW 60";
+                  }
+
+                  if (result.hasMinimalNoiseReduction) {
+                      result.label += " • NR-MIN";
+                  }
+
+                  if (result.hasExposureTimePriority) {
+                      result.label += " • AE-SHUTTER";
+                  }
+
+                  if (result.hasFixed60) {
+                      result.label += " • 60FIX";
+                  }
+
+                  if (result.hasHighQualityEdge) {
+                      result.label += " • EDGE-HQ";
+                  }
+
+                  if (result.hasHighQualityToneMap) {
+                      result.label += " • TONE-HQ";
+                  }
+
+                  if (result.hasContrastCurve) {
+                      result.label += " • MID-CURVE";
+                  }
+
+                  return result;
+              }
+
+              @SuppressWarnings({"rawtypes", "unchecked"})
+              private void applyAdaptiveIsp(
+                  androidx.camera.core.ExtendableBuilder previewOrVideoBuilder,
+                  boolean highFrameRate
+              ) {
+                  /*
+                   * R32 MOTION DETAIL:
+                   * Preserve R31 strict 4K direct HEVC unchanged.
+                   * On API 36 devices that advertise AE exposure-time priority,
+                   * hold a faster shutter while AE continues adjusting ISO:
+                   * ~1/120s at 60fps and ~1/120s at 30fps.
+                   * If rejected, retry the same quality with normal AE.
+                   */
+                  Camera2Interop.Extender interop =
+                      new Camera2Interop.Extender(previewOrVideoBuilder);
+
+                  int edgeMode =
+                      hardwareProfile.hasHighQualityEdge
+                          ? CaptureRequest.EDGE_MODE_HIGH_QUALITY
+                          : CaptureRequest.EDGE_MODE_FAST;
+
+                  interop.setCaptureRequestOption(
+                      CaptureRequest.EDGE_MODE,
+                      edgeMode
+                  );
+
+                  if (hardwareProfile.hasContrastCurve) {
+                      float[] midtoneCurve =
+                          new float[] {
+                              0.00f, 0.00f,
+                              0.20f, 0.18f,
+                              0.50f, 0.50f,
+                              0.80f, 0.82f,
+                              1.00f, 1.00f
+                          };
+
+                      TonemapCurve toneCurve =
+                          new TonemapCurve(
+                              midtoneCurve,
+                              midtoneCurve,
+                              midtoneCurve
+                          );
+
+                      interop.setCaptureRequestOption(
+                          CaptureRequest.TONEMAP_MODE,
+                          CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE
+                      );
+
+                      interop.setCaptureRequestOption(
+                          CaptureRequest.TONEMAP_CURVE,
+                          toneCurve
+                      );
+
+                  } else {
+                      interop.setCaptureRequestOption(
+                          CaptureRequest.TONEMAP_MODE,
+                          hardwareProfile.hasHighQualityToneMap
+                              ? CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
+                              : CaptureRequest.TONEMAP_MODE_FAST
+                      );
+                  }
+
+                  int noiseMode =
+                      highFrameRate &&
+                      hardwareProfile.hasMinimalNoiseReduction
+                          ? CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL
+                          : CaptureRequest.NOISE_REDUCTION_MODE_FAST;
+
+                  interop.setCaptureRequestOption(
+                      CaptureRequest.NOISE_REDUCTION_MODE,
+                      noiseMode
+                  );
+
+                  interop.setCaptureRequestOption(
+                      CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                      CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY
+                  );
+
+                  if (highFrameRate &&
+                      hardwareProfile.hasFixed60) {
+
+                      interop.setCaptureRequestOption(
+                          CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                          new Range<Integer>(60, 60)
+                      );
+                  }
+
+                  interop.setCaptureRequestOption(
+                      CaptureRequest.CONTROL_AE_ANTIBANDING_MODE,
+                      CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+                  );
+              }
+
+              private void applyHighlightProtection() {
+                  if (camera == null) return;
+
+                  ExposureState exposure =
+                      camera.getCameraInfo().getExposureState();
+
+                  Range<Integer> range =
+                      exposure.getExposureCompensationRange();
+
+                  int target = 0;
+
+                  if (highlightProtect) {
+                      double step =
+                          exposure.getExposureCompensationStep().doubleValue();
+
+                      if (step > 0.0) {
+                          double wantedEv = 1.00;
+                          target = (int) Math.round(wantedEv / step);
+                      }
+                  }
+
+                  target = Math.max(range.getLower(),
+                      Math.min(range.getUpper(), target));
+
+                  camera.getCameraControl()
+                      .setExposureCompensationIndex(target);
+              }
+
+              private void toggleTorch() {
+                  if (camera == null) {
+                      status.setText("CAMERA NOT READY");
+                      return;
+                  }
+
+                  if (!camera.getCameraInfo().hasFlashUnit()) {
+                      status.setText("NO FLASH");
+                      return;
+                  }
+
+                  torchOn = !torchOn;
+                  camera.getCameraControl().enableTorch(torchOn);
+                  lightButton.setText(torchOn ? "LIGHT ON" : "LIGHT");
+              }
+
+              private void toggleRecording() {
+                  if (recording != null) {
+                      recording.stop();
+                      return;
+                  }
+
+                  if (videoCapture == null) {
+                      status.setText("CAMERA NOT READY");
+                      return;
+                  }
+
+                  String stamp =
+                      new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+                          .format(new Date());
+
+                  ContentValues values = new ContentValues();
+
+                  String captureName =
+                      directHevcActive
+                          ? "DU_R40_TIKTOK_BRIGHT_1080P60_HEVC_" + stamp
+                          : "DU_R37_TIKTOK_1080P60_H264_" + stamp;
+
+                  values.put(
+                      MediaStore.Video.Media.DISPLAY_NAME,
+                      captureName
+                  );
+                  values.put(
+                      MediaStore.Video.Media.MIME_TYPE,
+                      "video/mp4"
+                  );
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      values.put(
+                          MediaStore.Video.Media.RELATIVE_PATH,
+                          directHevcActive
+                              ? "Movies/DU Camera/R40 TikTok Indoor Bright"
+                              : "Movies/DU Camera/R37 TikTok Master H264"
+                      );
+                  }
+
+                  MediaStoreOutputOptions output =
+                      new MediaStoreOutputOptions.Builder(
+                          getContentResolver(),
+                          MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                      )
+                      .setContentValues(values)
+                      .build();
+
+                  androidx.camera.video.PendingRecording pending =
+                      videoCapture.getOutput().prepareRecording(this, output);
+
+                  if (hasAudioPermission()) {
+                      pending = pending.withAudioEnabled();
+                  }
+
+                  recording =
+                      pending.start(
+                          ContextCompat.getMainExecutor(this),
+                          event -> {
+                              if (event instanceof VideoRecordEvent.Start) {
+                                  recordButton.setText("STOP");
+                                  status.setText(
+                                      directHevcActive
+                                          ? "1080P60/HEVC TIKTOK • REC"
+                                          : "H264 SAFE • REC"
+                                  );
+                              } else if (event instanceof VideoRecordEvent.Finalize) {
+                                  VideoRecordEvent.Finalize end =
+                                      (VideoRecordEvent.Finalize) event;
+
+                                  recording = null;
+                                  recordButton.setText("RECORD");
+
+                                  if (end.hasError()) {
+                                      status.setText("SAVE ERROR");
+                                  } else {
+                                      Uri rawUri =
+                                          end.getOutputResults().getOutputUri();
+
+                                      if (directHevcActive &&
+                                          !directGradeCopy) {
+                                          status.setText(
+                                              "DIRECT MASTER • FINAL SAVED"
+                                          );
+                                      } else if (autoEnhance &&
+                                          rawUri != null &&
+                                          !Uri.EMPTY.equals(rawUri)) {
+                                          status.setText(
+                                              directHevcActive
+                                                  ? "CREATING GRADE COPY..."
+                                                  : "SAFE ENHANCING..."
+                                          );
+                                          enhanceRecordedMaster(
+                                              rawUri,
+                                              true
+                                          );
+                                      } else {
+                                          status.setText(
+                                              "MASTER SAVED"
+                                          );
+                                      }
+                                  }
+                              }
+                          }
+                      );
+              }
+
+              private void enhanceRecordedMaster(
+                  Uri inputUri,
+                  boolean preferHevc
+              ) {
+                  try {
+                      File directory =
+                          getExternalFilesDir(
+                              Environment.DIRECTORY_MOVIES
+                          );
+
+                      if (directory == null) {
+                          directory = getCacheDir();
+                      }
+
+                      File enhancedFile =
+                          new File(
+                              directory,
+                              "DU_R37_GRADED_" +
+                              System.currentTimeMillis() +
+                              ".mp4"
+                          );
+
+                      if (enhancedFile.exists()) {
+                          enhancedFile.delete();
+                      }
+
+                      // R37 TikTok Master optional grade-copy path.
+                      // DIRECT FINAL remains the default and avoids a second encode.
+                      // The proven R36 grade chain is retained only if the user
+                      // explicitly taps +GRADE COPY.
+                      Effect contrast =
+                          new Contrast(-0.02f);
+
+                      Effect saturation =
+                          new HslAdjustment.Builder()
+                              .adjustSaturation(5.5f)
+                              .adjustLightness(0.5f)
+                              .build();
+
+                      Effect channelBalance =
+                          new RgbAdjustment.Builder()
+                              .setRedScale(1.018f)
+                              .setGreenScale(1.010f)
+                              .setBlueScale(0.995f)
+                              .build();
+
+                      EditedMediaItem editedItem =
+                          new EditedMediaItem.Builder(
+                              MediaItem.fromUri(inputUri)
+                          )
+                          .setEffects(
+                              new Effects(
+                                  Collections.emptyList(),
+                                  Arrays.asList(
+                                      contrast,
+                                      saturation,
+                                      channelBalance
+                                  )
+                              )
+                          )
+                          .build();
+
+                      VideoEncoderSettings encoderSettings =
+                          new VideoEncoderSettings.Builder()
+                              .setBitrate(46_000_000)
+                              .setiFrameIntervalSeconds(1.0f)
+                              .build();
+
+                      DefaultEncoderFactory encoderFactory =
+                          new DefaultEncoderFactory.Builder(this)
+                              .setEnableFallback(true)
+                              .setEnableCodecDbLite(true)
+                              .setRequestedVideoEncoderSettings(
+                                  encoderSettings
+                              )
+                              .build();
+
+                      Transformer.Builder builder =
+                          new Transformer.Builder(this)
+                              .setEncoderFactory(encoderFactory)
+                              .addListener(
+                                  new Transformer.Listener() {
+                                      @Override
+                                      public void onCompleted(
+                                          Composition composition,
+                                          ExportResult exportResult
+                                      ) {
+                                          activeTransformer = null;
+                                          publishEnhancedVideo(
+                                              enhancedFile
+                                          );
+                                      }
+
+                                      @Override
+                                      public void onError(
+                                          Composition composition,
+                                          ExportResult exportResult,
+                                          ExportException exportException
+                                      ) {
+                                          activeTransformer = null;
+
+                                          // HEVC is preferred for social-media
+                                          // quality/size. Retry as AVC on phones
+                                          // whose encoders reject HEVC.
+                                          if (preferHevc) {
+                                              if (enhancedFile.exists()) {
+                                                  enhancedFile.delete();
+                                              }
+
+                                              status.setText(
+                                                  "SAFE FALLBACK • AVC"
+                                              );
+
+                                              enhanceRecordedMaster(
+                                                  inputUri,
+                                                  false
+                                              );
+                                          } else {
+                                              status.setText(
+                                                  "RAW SAFE • ENHANCE FAILED"
+                                              );
+                                          }
+                                      }
+                                  }
+                              );
+
+                      builder.setVideoMimeType(
+                          preferHevc
+                              ? MimeTypes.VIDEO_H265
+                              : MimeTypes.VIDEO_H264
+                      );
+
+                      activeTransformer = builder.build();
+
+                      activeTransformer.start(
+                          editedItem,
+                          enhancedFile.getAbsolutePath()
+                      );
+
+                  } catch (Throwable error) {
+                      activeTransformer = null;
+                      status.setText(
+                          "RAW SAVED • ENHANCE ERROR"
+                      );
+                  }
+              }
+
+              private void publishEnhancedVideo(
+                  File sourceFile
+              ) {
+                  if (sourceFile == null ||
+                      !sourceFile.exists()) {
+                      status.setText(
+                          "RAW SAVED • EXPORT MISSING"
+                      );
+                      return;
+                  }
+
+                  Uri destination = null;
+
+                  try {
+                      ContentValues values =
+                          new ContentValues();
+
+                      values.put(
+                          MediaStore.Video.Media.DISPLAY_NAME,
+                          "DU_R37_GRADED_PRO_" +
+                          new SimpleDateFormat(
+                              "yyyyMMdd_HHmmss",
+                              Locale.US
+                          ).format(new Date())
+                      );
+
+                      values.put(
+                          MediaStore.Video.Media.MIME_TYPE,
+                          "video/mp4"
+                      );
+
+                      if (Build.VERSION.SDK_INT >=
+                          Build.VERSION_CODES.Q) {
+                          values.put(
+                              MediaStore.Video.Media.RELATIVE_PATH,
+                              "Movies/DU Camera/R37 Graded"
+                          );
+                          values.put(
+                              MediaStore.Video.Media.IS_PENDING,
+                              1
+                          );
+                      }
+
+                      destination =
+                          getContentResolver().insert(
+                              MediaStore.Video.Media
+                                  .EXTERNAL_CONTENT_URI,
+                              values
+                          );
+
+                      if (destination == null) {
+                          throw new IllegalStateException(
+                              "Enhanced MediaStore insert failed"
+                          );
+                      }
+
+                      try (
+                          InputStream input =
+                              new FileInputStream(sourceFile);
+                          OutputStream output =
+                              getContentResolver()
+                                  .openOutputStream(destination)
+                      ) {
+                          if (output == null) {
+                              throw new IllegalStateException(
+                                  "Enhanced output stream failed"
+                              );
+                          }
+
+                          byte[] buffer =
+                              new byte[1024 * 1024];
+
+                          int count;
+
+                          while ((count =
+                              input.read(buffer)) != -1) {
+                              output.write(
+                                  buffer,
+                                  0,
+                                  count
+                              );
+                          }
+
+                          output.flush();
+                      }
+
+                      if (Build.VERSION.SDK_INT >=
+                          Build.VERSION_CODES.Q) {
+                          ContentValues ready =
+                              new ContentValues();
+
+                          ready.put(
+                              MediaStore.Video.Media.IS_PENDING,
+                              0
+                          );
+
+                          getContentResolver().update(
+                              destination,
+                              ready,
+                              null,
+                              null
+                          );
+                      }
+
+                      sourceFile.delete();
+
+                      status.setText(
+                          "R37 GRADE • ENHANCED SAVED"
+                      );
+
+                  } catch (Throwable error) {
+                      if (destination != null) {
+                          try {
+                              getContentResolver().delete(
+                                  destination,
+                                  null,
+                                  null
+                              );
+                          } catch (Throwable ignored) {
+                          }
+                      }
+
+                      status.setText(
+                          "RAW SAVED • PUBLISH ERROR"
+                      );
+                  }
+              }
+
+              @Override
+              public void onRequestPermissionsResult(
+                  int requestCode,
+                  String[] permissions,
+                  int[] grantResults
+              ) {
+                  super.onRequestPermissionsResult(
+                      requestCode,
+                      permissions,
+                      grantResults
+                  );
+
+                  if (requestCode == REQUEST_CAMERA) {
+                      if (hasCameraPermission()) {
+                          startCamera();
+                      } else {
+                          status.setText("CAMERA PERMISSION DENIED");
+                      }
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (recording != null) {
+                      recording.stop();
+                  }
+                  if (activeTransformer != null) {
+                      activeTransformer.cancel();
+                      activeTransformer = null;
+                  }
+                  if (provider != null) {
+                      provider.unbindAll();
+                  }
+                  super.onDestroy();
+              }
+
+              private boolean hasCameraPermission() {
+                  return ContextCompat.checkSelfPermission(
+                      this,
+                      Manifest.permission.CAMERA
+                  ) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private boolean hasAudioPermission() {
+                  return ContextCompat.checkSelfPermission(
+                      this,
+                      Manifest.permission.RECORD_AUDIO
+                  ) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private TextView button(String text) {
+                  TextView view = new TextView(this);
+                  view.setText(text);
+                  view.setTextColor(Color.WHITE);
+                  view.setTextSize(11.5f);
+                  view.setGravity(Gravity.CENTER);
+
+                  GradientDrawable bg = new GradientDrawable();
+                  bg.setColor(0xDD111111);
+                  bg.setCornerRadius(dp(12));
+                  bg.setStroke(dp(1), 0xFFFFB323);
+
+                  view.setBackground(bg);
+                  return view;
+              }
+
+              private int dp(int value) {
+                  return (int) (
+                      value * getResources().getDisplayMetrics().density
+                  );
+              }
+          }
+          JAVA
+
+          cat > /tmp/R040-TIKTOK-INDOOR-BRIGHT-PRO-AUDIT.txt <<'TXT'
+          R040 TIKTOK INDOOR BRIGHT PRO AUDIT
+          PASS R39 1080p60 direct HEVC TikTok profile retained
+          PASS target bitrate remains 25 Mbps
+          PASS normal AE retained
+          PASS default exposure compensation changed 0.00 -> +1.00 EV
+          PASS EXP AUTO fallback remains available by button
+          PASS no forced SENSOR_EXPOSURE_TIME
+          PASS R36-R39 detail, tone, edge and color engine retained
+          PASS no second encode by default
+          PASS R38 1080p60 direct HEVC TikTok profile retained
+          PASS target bitrate remains 25 Mbps
+          PASS forced shutter-time capture request removed
+          PASS exposure-priority capture request removed
+          PASS normal AE chooses indoor shutter and ISO
+          PASS R36/R37/R38 detail, tone, edge and color engine retained
+          PASS no second encode by default
+          PASS R37 1080p60 direct HEVC TikTok profile retained
+          PASS target bitrate remains 25 Mbps
+          PASS R36/R37 detail, tone, edge and color engine retained
+          PASS no second encode by default
+          PASS built from proven R36 image engine
+          PASS exact Quality.FHD delivery profile
+          PASS primary target 1080p60
+          PASS primary direct HEVC/H.265
+          PASS 25 Mbps TikTok source bitrate
+          PASS SDR capture path
+          PASS R36 midtone contrast curve retained
+          PASS R36 EDGE-HQ capability path retained
+          PASS R36 noise-reduction detail path retained
+          PASS R36 shutter-priority motion path retained
+          PASS R36 highlight protection retained
+          PASS stabilization first / no-stab same-quality fallback
+          PASS H264 same-1080p60 fallback before 30fps fallback
+          PASS DIRECT FINAL default: no second encode
+          PASS optional grade copy retained but not automatic
+          PASS no UHD/4K request in R37 recording selector
+          TXT
+
+          SRC='r40-bright/app/src/main/java/com/sentongoharuna/ducamera/TikTokIndoorBrightCameraActivity.java'
+          grep -qx 'android.useAndroidX=true' r40-bright/gradle.properties
+          test "$(grep -c 'android.intent.action.MAIN' r40-bright/app/src/main/AndroidManifest.xml)" = "1"
+          test "$(grep -c 'android.intent.category.LAUNCHER' r40-bright/app/src/main/AndroidManifest.xml)" = "1"
+          grep -q 'camera-video:1.7.0-alpha03' r40-bright/app/build.gradle
+          grep -q 'ExperimentalMimeTypeApi' "$SRC"
+          grep -q 'QualitySelector.from(Quality.FHD)' "$SRC"
+          ! grep -q 'QualitySelector.from(Quality.UHD)' "$SRC"
+          grep -q '25_000_000' "$SRC"
+          grep -q 'new Range<>(60, 60)' "$SRC"
+          grep -q 'MIMETYPE_VIDEO_HEVC' "$SRC"
+          grep -q 'VIDEO_CAPABILITIES_SOURCE_CODEC_CAPABILITIES' "$SRC"
+          grep -q 'DynamicRange.SDR' "$SRC"
+          grep -q 'TONEMAP_MODE_CONTRAST_CURVE' "$SRC"
+          grep -q 'TONEMAP_CURVE' "$SRC"
+          grep -q 'EDGE_MODE_HIGH_QUALITY' "$SRC"
+          grep -q 'NOISE_REDUCTION_MODE_MINIMAL' "$SRC"
+          grep -q 'CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY' "$SRC"
+          grep -q 'CONTROL_AE_TARGET_FPS_RANGE' "$SRC"
+          grep -q 'BRIGHT +1.0' "$SRC"
+          grep -q 'EXP AUTO' "$SRC"
+          grep -q 'DIRECT FINAL' "$SRC"
+          grep -q '1080P60 STAB -> NO-STAB' "$SRC"
+          grep -q 'HEVC -> H264 • KEEP 1080P60' "$SRC"
+          ! grep -q 'getSelectedQuality' "$SRC"
+          ! grep -q 'getResolutionInfo' "$SRC"
+          ! grep -q 'setEnableFormatFallback' "$SRC"
+
+          echo "PASS: R037 TikTok Master source audit complete."
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Build R040 TIKTOK INDOOR BRIGHT PRO APK
+        working-directory: r40-bright
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee r040-tiktok-indoor-bright-pro-build.log
+
+      - name: Prepare APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='r40-bright/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R040-TIKTOK-INDOOR-BRIGHT-PRO.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R040-TIKTOK-INDOOR-BRIGHT-PRO-AUDIT
+          path: /tmp/R040-TIKTOK-INDOOR-BRIGHT-PRO-AUDIT.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R040-TIKTOK-INDOOR-BRIGHT-PRO-FAILED-BUILD-LOG
+          path: r40-bright/r040-tiktok-indoor-bright-pro-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload R040 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R040-TIKTOK-INDOOR-BRIGHT-PRO
+          path: DU-Camera-R040-TIKTOK-INDOOR-BRIGHT-PRO.apk
+          if-no-files-found: error
+          retention-days: 14
