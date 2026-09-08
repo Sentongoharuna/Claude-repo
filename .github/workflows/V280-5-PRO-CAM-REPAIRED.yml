@@ -1,0 +1,88 @@
+name: Build develop.uganda V280-5 PRO CAM REPAIRED
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/V280-5-PRO-CAM.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_v280_5:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run preserved V280-5 build recipe
+        shell: bash
+        env:
+          LEGACY_WORKFLOW_URL: https://raw.githubusercontent.com/Sentongoharuna/Claude-repo/3324bd4558283334bd5b93225ee9dfd19cf59cdb/.github/workflows/V280-5-PRO-CAM.yml
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 "$LEGACY_WORKFLOW_URL" -o /tmp/V280-5-original.yml
+          python3 -m pip -q install pyyaml
+          python3 <<'PY'
+          import os, subprocess, yaml
+          from pathlib import Path
+
+          p = Path('/tmp/V280-5-original.yml')
+          data = yaml.safe_load(p.read_text())
+          jobs = data.get('jobs', {})
+          job = jobs.get('build_v280_5') or next(iter(jobs.values()))
+          steps = job.get('steps', [])
+          env = os.environ.copy()
+
+          for index, step in enumerate(steps, 1):
+              name = step.get('name', f'step-{index}')
+              if 'run' not in step:
+                  print(f'::notice::Skipping action step from preserved recipe: {name}')
+                  continue
+              print(f'\n===== V280-5 preserved step {index}: {name} =====')
+              step_env = env.copy()
+              for k, v in (step.get('env') or {}).items():
+                  step_env[str(k)] = str(v)
+              wd = step.get('working-directory') or os.getcwd()
+              subprocess.run(
+                  ['bash', '-euo', 'pipefail', '-c', step['run']],
+                  cwd=wd, env=step_env, check=True
+              )
+              github_env = env.get('GITHUB_ENV')
+              if github_env and Path(github_env).exists():
+                  for line in Path(github_env).read_text(errors='ignore').splitlines():
+                      if '=' in line and not line.startswith('#'):
+                          k, v = line.split('=', 1)
+                          if k:
+                              env[k] = v
+          PY
+
+      - name: Locate APK output
+        if: always()
+        shell: bash
+        run: |
+          echo 'APK files found:'
+          find . -type f -name '*.apk' -print || true
+
+      - name: Upload V280-5 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: develop-uganda-V280-5-PRO-CAM-APK
+          path: |
+            **/build/outputs/apk/**/*.apk
+            **/*.apk
+          if-no-files-found: error
+          retention-days: 30
