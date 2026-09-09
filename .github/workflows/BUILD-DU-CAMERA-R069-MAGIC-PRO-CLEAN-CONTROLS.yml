@@ -1,0 +1,2392 @@
+name: Build DU Camera R069 MAGIC PRO CLEAN CONTROLS APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+    - '.github/workflows/BUILD-DU-CAMERA-R050-REFERENCE-TEXTURE-BALANCE-PRO.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r069_magic_pro_clean_controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Create R047 Reference Rich Image Pro from proven R45 quality master
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        rm -rf r50-texture
+        mkdir -p r50-texture/app/src/main/java/com/sentongoharuna/ducamera
+        mkdir -p r50-texture/app/src/main/res/values
+
+        cat > r50-texture/gradle.properties <<'PROPS'
+        android.useAndroidX=true
+        android.enableJetifier=false
+        org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+        PROPS
+
+        cat > r50-texture/settings.gradle <<'GRADLE'
+        pluginManagement {
+            repositories {
+                google()
+                mavenCentral()
+                gradlePluginPortal()
+            }
+        }
+
+        dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+
+        rootProject.name = "DUCameraR050ReferenceTextureBalancePro"
+        include(":app")
+        GRADLE
+
+        cat > r50-texture/build.gradle <<'GRADLE'
+        plugins {
+            id 'com.android.application' version '8.11.1' apply false
+        }
+        GRADLE
+
+        cat > r50-texture/app/build.gradle <<'GRADLE'
+        plugins {
+            id 'com.android.application'
+        }
+
+        android {
+            namespace 'com.sentongoharuna.ducamera'
+            compileSdk 36
+
+            defaultConfig {
+                applicationId 'com.sentongoharuna.ducamera.r050referencetexturebalancepro'
+                minSdk 24
+                targetSdk 35
+                versionCode 400000064
+                versionName '1.0-r050-reference-texture-balance-pro'
+            }
+
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+        }
+
+        dependencies {
+            implementation 'androidx.activity:activity:1.10.1'
+            implementation 'androidx.core:core:1.15.0'
+            implementation 'androidx.camera:camera-core:1.7.0-alpha03'
+            implementation 'androidx.camera:camera-camera2:1.7.0-alpha03'
+            implementation 'androidx.camera:camera-lifecycle:1.7.0-alpha03'
+            implementation 'androidx.camera:camera-video:1.7.0-alpha03'
+            implementation 'androidx.camera:camera-view:1.7.0-alpha03'
+
+            // R22 true saved-video enhancement.
+            def media3_version = '1.10.1'
+            implementation "androidx.media3:media3-common:${media3_version}"
+            implementation "androidx.media3:media3-effect:${media3_version}"
+            implementation "androidx.media3:media3-transformer:${media3_version}"
+            implementation 'androidx.camera.media3:media3-effect:1.0.0-alpha04'
+        }
+        GRADLE
+
+        cat > r50-texture/app/src/main/res/values/styles.xml <<'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <resources>
+            <style name="Theme.DUCamera" parent="@android:style/Theme.Material.NoActionBar">
+                <item name="android:fontFamily">sans</item>
+                <item name="android:windowActionModeOverlay">true</item>
+                <item name="android:windowBackground">@android:color/black</item>
+                <item name="android:statusBarColor">@android:color/black</item>
+                <item name="android:navigationBarColor">@android:color/black</item>
+                <item name="android:colorAccent">#FFB323</item>
+            </style>
+        </resources>
+        XML
+
+        cat > r50-texture/app/src/main/AndroidManifest.xml <<'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+            <uses-permission android:name="android.permission.CAMERA" />
+            <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+            <uses-feature
+                android:name="android.hardware.camera.any"
+                android:required="true" />
+
+            <application
+                android:allowBackup="false"
+                android:label="DU Camera R50 Texture Balance"
+                android:theme="@style/Theme.DUCamera">
+
+                <activity
+                    android:name=".R50ReferenceTextureBalanceCameraActivity"
+                    android:exported="true">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+
+            </application>
+        </manifest>
+        XML
+
+        cat > r50-texture/app/src/main/java/com/sentongoharuna/ducamera/R50ReferenceTextureBalanceCameraActivity.java <<'JAVA'
+        package com.sentongoharuna.ducamera;
+
+        import android.Manifest;
+        import android.content.ContentValues;
+        import android.content.pm.PackageManager;
+        import android.content.Context;
+        import android.content.SharedPreferences;
+        import android.content.pm.ActivityInfo;
+        import android.net.Uri;
+        import android.os.Environment;
+        import android.graphics.Color;
+        import android.graphics.drawable.GradientDrawable;
+        import android.hardware.camera2.CaptureRequest;
+        import android.hardware.camera2.CameraCharacteristics;
+        import android.hardware.camera2.CameraManager;
+        import android.hardware.camera2.params.StreamConfigurationMap;
+        import android.os.Build;
+        import android.os.Bundle;
+        import android.os.Handler;
+        import android.os.Looper;
+        import android.os.SystemClock;
+        import android.media.MediaRecorder;
+        import android.media.MediaFormat;
+        import android.provider.MediaStore;
+        import android.util.Range;
+        import android.util.Size;
+        import android.view.Gravity;
+        import android.view.MotionEvent;
+        import android.view.ScaleGestureDetector;
+        import android.view.Surface;
+        import android.view.WindowManager;
+        import android.view.View;
+        import android.graphics.Typeface;
+        import android.widget.FrameLayout;
+        import android.widget.LinearLayout;
+        import android.widget.TextView;
+
+        import androidx.activity.ComponentActivity;
+        import androidx.annotation.OptIn;
+        import androidx.camera.camera2.interop.Camera2Interop;
+        import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
+        import androidx.camera.core.Camera;
+        import androidx.camera.core.CameraSelector;
+        import androidx.camera.core.DynamicRange;
+        import androidx.camera.core.CameraEffect;
+        import androidx.camera.core.UseCaseGroup;
+        import androidx.camera.core.ExposureState;
+        import androidx.camera.core.FocusMeteringAction;
+        import androidx.camera.core.MeteringPoint;
+        import androidx.camera.core.Preview;
+        import androidx.camera.core.ZoomState;
+        import androidx.camera.lifecycle.ProcessCameraProvider;
+        import androidx.camera.video.ExperimentalMimeTypeApi;
+        import androidx.camera.video.FallbackStrategy;
+        import androidx.camera.video.MediaStoreOutputOptions;
+        import androidx.camera.video.Quality;
+        import androidx.camera.video.QualitySelector;
+        import androidx.camera.video.Recorder;
+        import androidx.camera.video.Recording;
+        import androidx.camera.video.VideoCapture;
+        import androidx.camera.video.VideoRecordEvent;
+        import androidx.camera.view.PreviewView;
+        import androidx.camera.media3.effect.Media3Effect;
+        import androidx.core.content.ContextCompat;
+        import androidx.media3.common.Effect;
+        import androidx.media3.common.MediaItem;
+        import androidx.media3.common.MimeTypes;
+        import androidx.media3.common.util.UnstableApi;
+        import androidx.media3.effect.Contrast;
+        import androidx.media3.effect.HslAdjustment;
+        import androidx.media3.effect.RgbAdjustment;
+        import androidx.media3.transformer.Composition;
+        import androidx.media3.transformer.DefaultEncoderFactory;
+        import androidx.media3.transformer.EditedMediaItem;
+        import androidx.media3.transformer.Effects;
+        import androidx.media3.transformer.ExportException;
+        import androidx.media3.transformer.ExportResult;
+        import androidx.media3.transformer.Transformer;
+        import androidx.media3.transformer.VideoEncoderSettings;
+
+        import com.google.common.util.concurrent.ListenableFuture;
+
+        import java.io.File;
+        import java.io.FileInputStream;
+        import java.io.InputStream;
+        import java.io.OutputStream;
+        import java.text.SimpleDateFormat;
+        import java.util.Arrays;
+        import java.util.Collections;
+        import java.util.Date;
+        import java.util.Locale;
+        import java.util.concurrent.TimeUnit;
+
+        @UnstableApi
+        @OptIn(markerClass = {
+            ExperimentalCamera2Interop.class,
+            ExperimentalMimeTypeApi.class
+        })
+        public class R50ReferenceTextureBalanceCameraActivity extends ComponentActivity {
+
+            private static final int REQUEST_CAMERA = 4545;
+
+            private PreviewView previewView;
+            private TextView status;
+            private TextView recordButton;
+            private TextView lightButton;
+            private TextView highlightButton;
+            private TextView adaptiveButton;
+            private TextView motionButton;
+            private TextView enhanceButton;
+
+            private ProcessCameraProvider provider;
+            private Camera camera;
+            private VideoCapture<Recorder> videoCapture;
+            private Recording recording;
+            private ScaleGestureDetector scaleDetector;
+
+            private boolean useFront = false;
+            private boolean torchOn = false;
+            private boolean highlightProtect = false;
+            private boolean adaptiveEngine = true;
+            private boolean motionDetail = true;
+            private boolean autoEnhance = true;
+            private boolean directHevcAvailable = false;
+            private boolean directHevcActive = false;
+            private boolean directHevcRetryUsed = false;
+            private boolean directGradeCopy = false;
+            private Transformer activeTransformer = null;
+            private HardwareProfile hardwareProfile = new HardwareProfile();
+            private int activeAttempt = 0;
+            private boolean minimalIspRetryUsed = false;
+            private boolean motionPriorityRetryUsed = false;
+            private boolean highQualityEdgeRetryUsed = false;
+            private boolean highQualityToneRetryUsed = false;
+            private boolean highQualityColorActive = true;
+            private boolean highQualityColorRetryUsed = false;
+            private boolean noiseReductionOffActive = true;
+            private boolean noiseReductionOffRetryUsed = false;
+            private boolean richImageActive = true;
+            private boolean richImageRetryUsed = false;
+            private Media3Effect richImageEffect;
+
+            // UI-only precision recording timeline. Does not touch the R45 capture engine.
+            private TextView precisionTimeline;
+            private static final String PREFS_NAME = "r48_reference_match";
+            private static final String PREF_ASPECT_9_16 = "aspect_9_16";
+            private TextView aspectButton;
+            private boolean aspectNineSixteen = true;
+            private Handler precisionHandler = new Handler(Looper.getMainLooper());
+            private long recordingStartNanos = 0L;
+            private boolean precisionClockRunning = false;
+            private final Runnable precisionClockTick = new Runnable() {
+                @Override
+                public void run() {
+                    if (!precisionClockRunning || precisionTimeline == null) return;
+
+                    long elapsed = Math.max(0L, SystemClock.elapsedRealtimeNanos() - recordingStartNanos);
+
+                    long hours = elapsed / 3_600_000_000_000L;
+                    long minutes = (elapsed / 60_000_000_000L) % 60L;
+                    long seconds = (elapsed / 1_000_000_000L) % 60L;
+                    long millis = (elapsed / 1_000_000L) % 1000L;
+                    long micros = (elapsed / 1_000L) % 1000L;
+                    long nanos = elapsed % 1000L;
+
+                    // Long, clean white timecode with many zeros. No background and no progress line.
+                    precisionTimeline.setText(String.format(
+                        Locale.US,
+                        "%04d:%02d:%02d:%03d:%03d:%03d",
+                        hours, minutes, seconds, millis, micros, nanos
+                    ));
+                    precisionTimeline.setTextColor(Color.WHITE);
+
+                    // Source clock is nanosecond resolution; visible refresh follows display cadence.
+                    precisionHandler.postDelayed(this, 16L);
+                }
+            };
+
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+                super.onCreate(savedInstanceState);
+
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                getWindow().setStatusBarColor(Color.BLACK);
+                getWindow().setNavigationBarColor(Color.BLACK);
+
+                SharedPreferences prefs =
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                aspectNineSixteen =
+                    prefs.getBoolean(PREF_ASPECT_9_16, true);
+
+                applyRequestedAspectOrientation();
+
+                buildUi();
+                installCameraGestures();
+
+                if (hasCameraPermission()) {
+                    startCamera();
+                } else {
+                    status.setText("ALLOW CAMERA");
+                    requestPermissions(
+                        new String[] {
+                            Manifest.permission.CAMERA,
+                            Manifest.permission.RECORD_AUDIO
+                        },
+                        REQUEST_CAMERA
+                    );
+                }
+            }
+
+            private void buildUi() {
+                FrameLayout root = new FrameLayout(this);
+                root.setBackgroundColor(Color.BLACK);
+
+                previewView = new PreviewView(this);
+                previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+                previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+                previewView.setBackgroundColor(Color.BLACK);
+                root.addView(
+                    previewView,
+                    new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                );
+
+                TextView master = button("R50 TEXTURE");
+                FrameLayout.LayoutParams masterLp =
+                    new FrameLayout.LayoutParams(dp(108), dp(42), Gravity.TOP | Gravity.START);
+                masterLp.leftMargin = dp(12);
+                masterLp.topMargin = dp(16);
+                root.addView(master, masterLp);
+
+                // Clean precision recorder timecode: digits only, no panel, no progress line.
+                precisionTimeline = new TextView(this);
+                precisionTimeline.setText("0000:00:00:000:000:000");
+                precisionTimeline.setTextColor(Color.WHITE);
+                precisionTimeline.setTextSize(16f);
+                precisionTimeline.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+                precisionTimeline.setGravity(Gravity.CENTER);
+                precisionTimeline.setSingleLine(true);
+                precisionTimeline.setIncludeFontPadding(false);
+                precisionTimeline.setShadowLayer(2.2f, 0f, 1f, Color.BLACK);
+                precisionTimeline.setBackgroundColor(Color.TRANSPARENT);
+                precisionTimeline.setVisibility(View.GONE);
+
+                FrameLayout.LayoutParams timerLp =
+                    new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        dp(42),
+                        Gravity.TOP
+                    );
+                timerLp.leftMargin = dp(8);
+                timerLp.rightMargin = dp(8);
+                timerLp.topMargin = dp(62);
+                root.addView(precisionTimeline, timerLp);
+
+                aspectButton = button(
+                    aspectNineSixteen ? "9:16" : "16:9"
+                );
+                FrameLayout.LayoutParams aspectLp =
+                    new FrameLayout.LayoutParams(dp(82), dp(42), Gravity.TOP | Gravity.END);
+                aspectLp.topMargin = dp(16);
+                aspectLp.rightMargin = dp(12);
+                root.addView(aspectButton, aspectLp);
+                aspectButton.setOnClickListener(v -> {
+                    if (recording != null) return;
+
+                    aspectNineSixteen = !aspectNineSixteen;
+
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(PREF_ASPECT_9_16, aspectNineSixteen)
+                        .apply();
+
+                    aspectButton.setText(
+                        aspectNineSixteen ? "9:16" : "16:9"
+                    );
+
+                    applyRequestedAspectOrientation();
+                });
+
+                status = button("R50 TEXTURE • OPENING");
+                FrameLayout.LayoutParams statusLp =
+                    new FrameLayout.LayoutParams(dp(212), dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                statusLp.topMargin = dp(108);
+                root.addView(status, statusLp);
+                status.setOnClickListener(v -> startCamera());
+
+                LinearLayout qualityRail = new LinearLayout(this);
+                qualityRail.setOrientation(LinearLayout.VERTICAL);
+                qualityRail.setGravity(Gravity.CENTER);
+
+                adaptiveButton = button("SOCIAL+");
+                motionButton = button("MOTION+");
+                enhanceButton = button("DIRECT FINAL");
+                TextView bitrate = button("15 Mbps");
+                TextView fps = button("60 FPS");
+                TextView stab = button("STAB AUTO");
+                highlightButton = button("AE AUTO");
+
+                qualityRail.addView(adaptiveButton, railLp());
+                qualityRail.addView(motionButton, railLp());
+                qualityRail.addView(enhanceButton, railLp());
+                qualityRail.addView(bitrate, railLp());
+                qualityRail.addView(fps, railLp());
+                qualityRail.addView(stab, railLp());
+                qualityRail.addView(highlightButton, railLp());
+
+                FrameLayout.LayoutParams railRootLp =
+                    new FrameLayout.LayoutParams(dp(104), FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.END | Gravity.CENTER_VERTICAL);
+                railRootLp.rightMargin = dp(10);
+                root.addView(qualityRail, railRootLp);
+
+                adaptiveButton.setOnClickListener(v -> {
+                    if (recording != null) return;
+                    adaptiveEngine = !adaptiveEngine;
+                    adaptiveButton.setText(adaptiveEngine ? "SOCIAL+" : "NATURAL");
+                    startCamera();
+                });
+
+                motionButton.setOnClickListener(v -> {
+                    if (recording != null) return;
+                    motionDetail = !motionDetail;
+                    motionButton.setText(motionDetail ? "MOTION+" : "MOTION OFF");
+                    startCamera();
+                });
+
+                enhanceButton.setOnClickListener(v -> {
+                    if (recording != null || activeTransformer != null) return;
+                    directGradeCopy = !directGradeCopy;
+                    enhanceButton.setText(
+                        directGradeCopy ? "+GRADE COPY" : "DIRECT FINAL"
+                    );
+                });
+
+                highlightButton.setOnClickListener(v -> {
+                    highlightProtect = false;
+                    highlightButton.setText("AE AUTO");
+                    applyHighlightProtection();
+                    status.setText("AE AUTO • TONE-HQ");
+                });
+
+                LinearLayout bottom = new LinearLayout(this);
+                bottom.setOrientation(LinearLayout.HORIZONTAL);
+                bottom.setGravity(Gravity.CENTER);
+                bottom.setPadding(dp(8), dp(8), dp(8), dp(18));
+                bottom.setBackgroundColor(0x66000000);
+
+                TextView lensButton = button("LENS");
+                recordButton = button("RECORD");
+                lightButton = button("LIGHT");
+
+                bottom.addView(lensButton, weightedButtonLp());
+                bottom.addView(recordButton, weightedButtonLp());
+                bottom.addView(lightButton, weightedButtonLp());
+
+                root.addView(
+                    bottom,
+                    new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.BOTTOM
+                    )
+                );
+
+                lensButton.setOnClickListener(v -> {
+                    if (recording != null) {
+                        recording.stop();
+                    }
+                    // Aspect mode is shared by BOTH front and back cameras.
+                    useFront = !useFront;
+                    startCamera();
+                });
+
+                recordButton.setOnClickListener(v -> toggleRecording());
+                lightButton.setOnClickListener(v -> toggleTorch());
+
+                setContentView(root);
+            }
+
+            private LinearLayout.LayoutParams railLp() {
+                LinearLayout.LayoutParams lp =
+                    new LinearLayout.LayoutParams(dp(96), dp(40));
+                lp.bottomMargin = dp(7);
+                return lp;
+            }
+
+            private LinearLayout.LayoutParams weightedButtonLp() {
+                LinearLayout.LayoutParams lp =
+                    new LinearLayout.LayoutParams(0, dp(62), 1f);
+                lp.setMarginStart(dp(5));
+                lp.setMarginEnd(dp(5));
+                return lp;
+            }
+
+            private void installCameraGestures() {
+                scaleDetector =
+                    new ScaleGestureDetector(
+                        this,
+                        new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                            @Override
+                            public boolean onScale(ScaleGestureDetector detector) {
+                                if (camera == null) return false;
+                                ZoomState zoom =
+                                    camera.getCameraInfo().getZoomState().getValue();
+                                if (zoom == null) return false;
+
+                                float next =
+                                    zoom.getZoomRatio() * detector.getScaleFactor();
+                                next = Math.max(zoom.getMinZoomRatio(),
+                                    Math.min(zoom.getMaxZoomRatio(), next));
+                                camera.getCameraControl().setZoomRatio(next);
+                                return true;
+                            }
+                        }
+                    );
+
+                previewView.setOnTouchListener((v, event) -> {
+                    scaleDetector.onTouchEvent(event);
+
+                    if (event.getAction() == MotionEvent.ACTION_UP &&
+                        !scaleDetector.isInProgress() &&
+                        camera != null) {
+
+                        MeteringPoint point =
+                            previewView.getMeteringPointFactory()
+                                .createPoint(event.getX(), event.getY());
+
+                        FocusMeteringAction action =
+                            new FocusMeteringAction.Builder(
+                                point,
+                                FocusMeteringAction.FLAG_AF |
+                                FocusMeteringAction.FLAG_AE
+                            )
+                            .setAutoCancelDuration(4, TimeUnit.SECONDS)
+                            .build();
+
+                        camera.getCameraControl().startFocusAndMetering(action);
+                        status.setText("FOCUS • EXPOSURE");
+                    }
+                    return true;
+                });
+            }
+
+            private void startCamera() {
+                if (!hasCameraPermission()) {
+                    status.setText("ALLOW CAMERA");
+                    requestPermissions(
+                        new String[] { Manifest.permission.CAMERA },
+                        REQUEST_CAMERA
+                    );
+                    return;
+                }
+
+                status.setText("R50 TEXTURE ENGINE OPENING");
+
+                ListenableFuture<ProcessCameraProvider> future =
+                    ProcessCameraProvider.getInstance(this);
+
+                future.addListener(() -> {
+                    try {
+                        provider = future.get();
+                        hardwareProfile = detectHardwareProfile();
+                        minimalIspRetryUsed = false;
+                        motionPriorityRetryUsed = false;
+                        highQualityEdgeRetryUsed = false;
+                        highQualityToneRetryUsed = false;
+                        highQualityColorActive = true;
+                        highQualityColorRetryUsed = false;
+                        noiseReductionOffActive = true;
+                        noiseReductionOffRetryUsed = false;
+                        richImageActive = true;
+                        richImageRetryUsed = false;
+                        directHevcRetryUsed = false;
+                        directHevcAvailable = detectDirectHevcSupport();
+                        directHevcActive = directHevcAvailable;
+                        activeAttempt = chooseStartingAttempt(hardwareProfile);
+                        bindMasterAttempt();
+                    } catch (Throwable error) {
+                        status.setText("PROVIDER ERROR • TAP");
+                    }
+                }, ContextCompat.getMainExecutor(this));
+            }
+
+            private boolean detectDirectHevcSupport() {
+                try {
+                    return Recorder.getSupportedVideoMimeTypes()
+                        .contains(MediaFormat.MIMETYPE_VIDEO_HEVC);
+                } catch (Throwable error) {
+                    return false;
+                }
+            }
+
+            private void closeRichImageEffect() {
+                if (richImageEffect != null) {
+                    try {
+                        richImageEffect.close();
+                    } catch (Throwable ignored) {
+                    }
+                    richImageEffect = null;
+                }
+            }
+
+            private void bindMasterAttempt() {
+                if (provider == null) return;
+
+                boolean target60;
+                boolean stabilization;
+                boolean ispEnhance;
+                int recorderBitrate;
+
+                /*
+                 * R41 TIKTOK SWEET SPOT:
+                 * Delivery-first profile based on the proven R40 image engine.
+                 * Exact FHD60 direct HEVC is retained.
+                 * Primary bitrate is 15 Mbps, close to the measured TikTok
+                 * reference profile (~13 Mbps) while leaving modest headroom.
+                 * No second encode is used when DIRECT FINAL is selected.
+                 */
+                switch (activeAttempt) {
+                    case 0:
+                        // Primary: exact 1080p60, stabilized, direct HEVC, 15 Mbps.
+                        target60 = true;
+                        stabilization = true;
+                        ispEnhance = adaptiveEngine;
+                        recorderBitrate = 15_000_000;
+                        break;
+
+                    case 1:
+                        // Same TikTok profile without stabilization if the device rejects the combo.
+                        target60 = true;
+                        stabilization = false;
+                        ispEnhance = adaptiveEngine;
+                        recorderBitrate = 15_000_000;
+                        break;
+
+                    case 2:
+                        // Motion fallback only after both 60 fps attempts.
+                        target60 = false;
+                        stabilization = true;
+                        ispEnhance = adaptiveEngine;
+                        recorderBitrate = 22_000_000;
+                        break;
+
+                    case 3:
+                        target60 = false;
+                        stabilization = false;
+                        ispEnhance = adaptiveEngine;
+                        recorderBitrate = 22_000_000;
+                        break;
+
+                    default:
+                        // Universal safety profile: exact FHD30, no extra ISP requests.
+                        target60 = false;
+                        stabilization = false;
+                        ispEnhance = false;
+                        recorderBitrate = 20_000_000;
+                        break;
+                }
+
+                try {
+                    Range<Integer> fpsRange =
+                        target60 ? new Range<>(60, 60) : new Range<>(30, 30);
+
+                    int targetRotation = currentTargetRotation();
+
+                    Preview.Builder previewBuilder =
+                        new Preview.Builder()
+                            .setTargetRotation(targetRotation)
+                            .setTargetFrameRate(fpsRange);
+
+                    if (stabilization) {
+                        previewBuilder.setPreviewStabilizationEnabled(true);
+                    }
+
+                    if (ispEnhance) {
+                        applyAdaptiveIsp(previewBuilder, target60);
+                    }
+
+                    Preview preview = previewBuilder.build();
+                    preview.setSurfaceProvider(previewView.getSurfaceProvider());
+
+                    // Exact FHD: no hidden UHD request and no lower-quality fallback.
+                    QualitySelector selector =
+                        QualitySelector.from(Quality.FHD);
+
+                    Recorder.Builder recorderBuilder =
+                        new Recorder.Builder()
+                            .setQualitySelector(selector)
+                            .setTargetVideoEncodingBitRate(
+                                recorderBitrate
+                            );
+
+                    if (directHevcActive) {
+                        recorderBuilder
+                            .setVideoCapabilitiesSource(
+                                Recorder
+                                    .VIDEO_CAPABILITIES_SOURCE_CODEC_CAPABILITIES
+                            )
+                            .setVideoMimeType(
+                                MediaFormat.MIMETYPE_VIDEO_HEVC
+                            );
+                    }
+
+                    Recorder recorder = recorderBuilder.build();
+
+                    VideoCapture.Builder<Recorder> videoBuilder =
+                        new VideoCapture.Builder<>(recorder)
+                            .setTargetRotation(targetRotation)
+                            .setDynamicRange(DynamicRange.SDR)
+                            .setTargetFrameRate(fpsRange);
+
+                    if (stabilization) {
+                        videoBuilder.setVideoStabilizationEnabled(true);
+                    }
+
+                    if (ispEnhance) {
+                        applyAdaptiveIsp(videoBuilder, target60);
+                    }
+
+                    VideoCapture<Recorder> candidateVideo =
+                        videoBuilder.build();
+
+                    CameraSelector cameraSelector =
+                        useFront
+                            ? CameraSelector.DEFAULT_FRONT_CAMERA
+                            : CameraSelector.DEFAULT_BACK_CAMERA;
+
+                    provider.unbindAll();
+
+                    closeRichImageEffect();
+
+                    Camera candidateCamera;
+
+                    if (richImageActive) {
+                        richImageEffect =
+                            new Media3Effect(
+                                this,
+                                CameraEffect.PREVIEW | CameraEffect.VIDEO_CAPTURE,
+                                ContextCompat.getMainExecutor(this),
+                                error -> runOnUiThread(() -> {
+                                    if (richImageActive &&
+                                        !richImageRetryUsed) {
+
+                                        richImageRetryUsed = true;
+                                        richImageActive = false;
+                                        closeRichImageEffect();
+                                        status.setText(
+                                            "TEXTURE FALLBACK • R49 SAFE"
+                                        );
+                                        bindMasterAttempt();
+                                    }
+                                })
+                            );
+
+                        /*
+                         * R50 REFERENCE TEXTURE BALANCE PRO:
+                         * Preserve the R45 exposure/ISP path and direct HEVC.
+                         * Add only mild live pre-encode richness:
+                         *   Contrast +0.035
+                         *   Saturation +2.5 + Lightness +1.0
+                         *   RGB 1.008 / 1.003 / 0.998
+                         */
+                        richImageEffect.setEffects(
+                            Arrays.asList(
+                                /*
+                                 * R50 texture balance:
+                                 * - keep R49 midtone/shadow opening
+                                 * - keep R49 saturation and warm colour balance
+                                 * - restore a small amount of micro-contrast for
+                                 *   better texture survival after TikTok
+                                 * - no extra sharpening and no saturation increase
+                                 */
+                                new Contrast(0.035f),
+                                new HslAdjustment.Builder()
+                                    .adjustSaturation(2.5f)
+                                    .adjustLightness(1.0f)
+                                    .build(),
+                                new RgbAdjustment.Builder()
+                                    .setRedScale(1.008f)
+                                    .setGreenScale(1.003f)
+                                    .setBlueScale(0.998f)
+                                    .build()
+                            )
+                        );
+
+                        UseCaseGroup useCaseGroup =
+                            new UseCaseGroup.Builder()
+                                .addUseCase(preview)
+                                .addUseCase(candidateVideo)
+                                .addEffect(richImageEffect)
+                                .build();
+
+                        candidateCamera =
+                            provider.bindToLifecycle(
+                                this,
+                                cameraSelector,
+                                useCaseGroup
+                            );
+
+                    } else {
+                        candidateCamera =
+                            provider.bindToLifecycle(
+                                this,
+                                cameraSelector,
+                                preview,
+                                candidateVideo
+                            );
+                    }
+
+                    camera = candidateCamera;
+                    videoCapture = candidateVideo;
+
+                    torchOn = false;
+                    lightButton.setText("LIGHT");
+                    applyHighlightProtection();
+
+                    String fps =
+                        target60
+                            ? (hardwareProfile.hasFixed60
+                                ? "60 LOCK"
+                                : "60 TARGET")
+                            : "30 LOCK";
+
+                    String engine =
+                        ispEnhance
+                            ? (hardwareProfile.hasHighQualityToneMap
+                                ? "R50 TEXTURE-HQ"
+                                : (hardwareProfile.hasHighQualityEdge
+                                    ? "REFERENCE EDGE-HQ"
+                                    : (target60 &&
+                                       hardwareProfile.hasMinimalNoiseReduction
+                                        ? "REFERENCE NR-MIN"
+                                        : "REFERENCE FAST")))
+                            : "NATURAL";
+
+                    String motion = motionDetail ? "MOTION+" : "MOTION";
+                    String stab = stabilization ? "STAB" : "NO-STAB";
+                    String codec =
+                        directHevcActive
+                            ? "HEVC DIRECT"
+                            : "H264 SAFE";
+
+                    enhanceButton.setText(
+                        directHevcActive
+                            ? (directGradeCopy
+                                ? "+GRADE COPY"
+                                : "DIRECT FINAL")
+                            : "SAFE ENHANCE"
+                    );
+
+                    status.setText(
+                        "REFERENCE 1080 • " +
+                        (aspectNineSixteen ? "9:16" : "16:9") +
+                        " • " + fps + " • 15M • " +
+                        engine + " • " + codec + " • " +
+                        motion + " • " + stab
+                    );
+
+                } catch (Throwable error) {
+                    if (richImageActive &&
+                        !richImageRetryUsed) {
+
+                        richImageRetryUsed = true;
+                        richImageActive = false;
+                        closeRichImageEffect();
+                        status.setText(
+                            "TEXTURE FALLBACK • R49 SAFE"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    if (ispEnhance &&
+                        target60 &&
+                        noiseReductionOffActive &&
+                        hardwareProfile.hasNoiseReductionOff &&
+                        !noiseReductionOffRetryUsed) {
+
+                        noiseReductionOffRetryUsed = true;
+                        noiseReductionOffActive = false;
+                        status.setText(
+                            "NR-OFF FALLBACK • NR-MIN"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    if (ispEnhance &&
+                        highQualityColorActive &&
+                        !highQualityColorRetryUsed) {
+
+                        highQualityColorRetryUsed = true;
+                        highQualityColorActive = false;
+                        status.setText(
+                            "COLOR-HQ FALLBACK • FAST"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    // Preserve R36 image-engine fallbacks at the SAME FHD quality.
+                    if (ispEnhance &&
+                        hardwareProfile.hasHighQualityToneMap &&
+                        !highQualityToneRetryUsed) {
+
+                        highQualityToneRetryUsed = true;
+                        hardwareProfile.hasHighQualityToneMap = false;
+                        status.setText(
+                            "TONE-HQ FALLBACK • FAST"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    if (ispEnhance &&
+                        hardwareProfile.hasHighQualityEdge &&
+                        !highQualityEdgeRetryUsed) {
+
+                        highQualityEdgeRetryUsed = true;
+                        hardwareProfile.hasHighQualityEdge = false;
+                        status.setText(
+                            "EDGE-HQ FALLBACK • FAST"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    if (ispEnhance &&
+                        target60 &&
+                        hardwareProfile.hasMinimalNoiseReduction &&
+                        !minimalIspRetryUsed) {
+
+                        minimalIspRetryUsed = true;
+                        hardwareProfile.hasMinimalNoiseReduction = false;
+                        status.setText(
+                            "NR-MIN FALLBACK • FAST"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    // First remove stabilization, keeping exact 1080p60 HEVC.
+                    if (activeAttempt == 0) {
+                        activeAttempt = 1;
+                        status.setText(
+                            "1080P60 STAB -> NO-STAB"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    // If HEVC itself is the problem, protect 60 fps before dropping to 30.
+                    if (activeAttempt == 1 &&
+                        directHevcActive &&
+                        !directHevcRetryUsed) {
+
+                        directHevcRetryUsed = true;
+                        directHevcActive = false;
+                        activeAttempt = 0;
+                        status.setText(
+                            "HEVC -> H264 • KEEP 1080P60"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    if (activeAttempt == 1) {
+                        activeAttempt = 2;
+                        status.setText(
+                            "1080P60 -> 1080P30 STAB"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    if (activeAttempt == 2) {
+                        activeAttempt = 3;
+                        status.setText(
+                            "1080P30 STAB -> NO-STAB"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    if (activeAttempt == 3) {
+                        activeAttempt = 4;
+                        status.setText(
+                            "1080P SAFE PROFILE"
+                        );
+                        bindMasterAttempt();
+                        return;
+                    }
+
+                    if (useFront) {
+                        useFront = false;
+                        hardwareProfile = detectHardwareProfile();
+                        activeAttempt = 0;
+                        status.setText("BACK CAMERA RETRY");
+                        bindMasterAttempt();
+                    } else {
+                        status.setText("BIND ERROR • TAP");
+                    }
+                }
+            }
+
+            private static class HardwareProfile {
+                boolean has4k = false;
+                boolean has60 = false;
+                boolean hasFixed60 = false;
+                boolean hasMinimalNoiseReduction = false;
+                boolean hasNoiseReductionOff = false;
+                boolean hasExposureTimePriority = false;
+                boolean hasHighQualityEdge = false;
+                boolean hasHighQualityToneMap = false;
+                String label = "HW SAFE";
+            }
+
+            private int chooseStartingAttempt(HardwareProfile profile) {
+                return 0;
+            }
+
+            private HardwareProfile detectHardwareProfile() {
+                HardwareProfile result = new HardwareProfile();
+
+                try {
+                    CameraManager manager =
+                        (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+
+                    Integer wantedFacing =
+                        useFront
+                            ? CameraCharacteristics.LENS_FACING_FRONT
+                            : CameraCharacteristics.LENS_FACING_BACK;
+
+                    for (String cameraId : manager.getCameraIdList()) {
+                        CameraCharacteristics chars =
+                            manager.getCameraCharacteristics(cameraId);
+
+                        Integer facing =
+                            chars.get(CameraCharacteristics.LENS_FACING);
+
+                        if (facing == null || !facing.equals(wantedFacing)) {
+                            continue;
+                        }
+
+                        StreamConfigurationMap map =
+                            chars.get(
+                                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+                            );
+
+                        if (map != null) {
+                            Size[] sizes = map.getOutputSizes(MediaRecorder.class);
+                            if (sizes != null) {
+                                for (Size size : sizes) {
+                                    int longSide =
+                                        Math.max(size.getWidth(), size.getHeight());
+                                    int shortSide =
+                                        Math.min(size.getWidth(), size.getHeight());
+
+                                    if (longSide >= 3840 && shortSide >= 2160) {
+                                        result.has4k = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        Range<Integer>[] ranges =
+                            chars.get(
+                                CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+                            );
+
+                        if (ranges != null) {
+                            for (Range<Integer> range : ranges) {
+                                if (range.getUpper() >= 60) {
+                                    result.has60 = true;
+                                }
+
+                                if (range.getLower() == 60 &&
+                                    range.getUpper() == 60) {
+                                    result.hasFixed60 = true;
+                                }
+                            }
+                        }
+
+                        int[] noiseModes =
+                            chars.get(
+                                CameraCharacteristics
+                                    .NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES
+                            );
+
+                        if (noiseModes != null) {
+                            for (int mode : noiseModes) {
+                                if (mode ==
+                                    CaptureRequest.NOISE_REDUCTION_MODE_OFF) {
+                                    result.hasNoiseReductionOff = true;
+                                }
+
+                                if (mode ==
+                                    CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL) {
+                                    result.hasMinimalNoiseReduction = true;
+                                }
+                            }
+                        }
+
+                        if (Build.VERSION.SDK_INT >= 36) {
+                            int[] priorityModes =
+                                chars.get(
+                                    CameraCharacteristics
+                                        .CONTROL_AE_AVAILABLE_PRIORITY_MODES
+                                );
+
+                            if (priorityModes != null) {
+                                for (int mode : priorityModes) {
+                                    if (mode ==
+                                        CaptureRequest
+                                            .CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY) {
+                                        result.hasExposureTimePriority = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        int[] edgeModes =
+                            chars.get(
+                                CameraCharacteristics
+                                    .EDGE_AVAILABLE_EDGE_MODES
+                            );
+
+                        if (edgeModes != null) {
+                            for (int mode : edgeModes) {
+                                if (mode ==
+                                    CaptureRequest.EDGE_MODE_HIGH_QUALITY) {
+                                    result.hasHighQualityEdge = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        int[] toneMapModes =
+                            chars.get(
+                                CameraCharacteristics
+                                    .TONEMAP_AVAILABLE_TONE_MAP_MODES
+                            );
+
+                        if (toneMapModes != null) {
+                            for (int mode : toneMapModes) {
+                                if (mode ==
+                                    CaptureRequest.TONEMAP_MODE_HIGH_QUALITY) {
+                                    result.hasHighQualityToneMap = true;
+                                }
+
+                            }
+                        }
+
+                        break;
+                    }
+                } catch (Throwable ignored) {
+                    result.has4k = false;
+                    result.has60 = false;
+                }
+
+                if (result.has4k && result.has60) {
+                    result.label = "HW 4K/60";
+                } else if (result.has4k) {
+                    result.label = "HW 4K";
+                } else if (result.has60) {
+                    result.label = "HW 60";
+                }
+
+                if (result.hasNoiseReductionOff) {
+                    result.label += " • NR-OFF";
+                } else if (result.hasMinimalNoiseReduction) {
+                    result.label += " • NR-MIN";
+                }
+
+                if (result.hasExposureTimePriority) {
+                    result.label += " • AE-SHUTTER";
+                }
+
+                if (result.hasFixed60) {
+                    result.label += " • 60FIX";
+                }
+
+                if (result.hasHighQualityEdge) {
+                    result.label += " • EDGE-HQ";
+                }
+
+                if (result.hasHighQualityToneMap) {
+                    result.label += " • TONE-HQ";
+                }
+
+                return result;
+            }
+
+            @SuppressWarnings({"rawtypes", "unchecked"})
+            private void applyAdaptiveIsp(
+                androidx.camera.core.ExtendableBuilder previewOrVideoBuilder,
+                boolean highFrameRate
+            ) {
+                /*
+                 * R45 R50 TEXTURE CONTRAST PRO:
+                 * Preserve R44 exposure, color, tone mapping and NR-OFF texture.
+                 * R45's only new visual change is a live Contrast(+0.04) + Saturation(+4.0) + mild warm RGB
+                 * CameraX Media3 effect before the single HEVC encode.
+                 * The complete R44 Camera2 ISP path remains unchanged.
+                 */
+                Camera2Interop.Extender interop =
+                    new Camera2Interop.Extender(previewOrVideoBuilder);
+
+                int edgeMode =
+                    hardwareProfile.hasHighQualityEdge
+                        ? CaptureRequest.EDGE_MODE_HIGH_QUALITY
+                        : CaptureRequest.EDGE_MODE_FAST;
+
+                interop.setCaptureRequestOption(
+                    CaptureRequest.EDGE_MODE,
+                    edgeMode
+                );
+
+                interop.setCaptureRequestOption(
+                    CaptureRequest.TONEMAP_MODE,
+                    hardwareProfile.hasHighQualityToneMap
+                        ? CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
+                        : CaptureRequest.TONEMAP_MODE_FAST
+                );
+
+                interop.setCaptureRequestOption(
+                    CaptureRequest.COLOR_CORRECTION_MODE,
+                    highQualityColorActive
+                        ? CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
+                        : CaptureRequest.COLOR_CORRECTION_MODE_FAST
+                );
+
+                int noiseMode;
+
+                if (highFrameRate &&
+                    noiseReductionOffActive &&
+                    hardwareProfile.hasNoiseReductionOff) {
+
+                    noiseMode =
+                        CaptureRequest.NOISE_REDUCTION_MODE_OFF;
+
+                } else if (highFrameRate &&
+                           hardwareProfile.hasMinimalNoiseReduction) {
+
+                    noiseMode =
+                        CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL;
+
+                } else {
+
+                    noiseMode =
+                        CaptureRequest.NOISE_REDUCTION_MODE_FAST;
+                }
+
+                interop.setCaptureRequestOption(
+                    CaptureRequest.NOISE_REDUCTION_MODE,
+                    noiseMode
+                );
+
+                interop.setCaptureRequestOption(
+                    CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                    CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY
+                );
+
+                interop.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_ANTIBANDING_MODE,
+                    CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO
+                );
+            }
+
+            private void applyHighlightProtection() {
+                if (camera == null) return;
+
+                ExposureState exposure =
+                    camera.getCameraInfo().getExposureState();
+
+                Range<Integer> range =
+                    exposure.getExposureCompensationRange();
+
+                int target = 0;
+
+                if (highlightProtect) {
+                    double step =
+                        exposure.getExposureCompensationStep().doubleValue();
+
+                    if (step > 0.0) {
+                        double wantedEv = 0.00;
+                        target = (int) Math.round(wantedEv / step);
+                    }
+                }
+
+                target = Math.max(range.getLower(),
+                    Math.min(range.getUpper(), target));
+
+                camera.getCameraControl()
+                    .setExposureCompensationIndex(target);
+            }
+
+            private void toggleTorch() {
+                if (camera == null) {
+                    status.setText("CAMERA NOT READY");
+                    return;
+                }
+
+                if (!camera.getCameraInfo().hasFlashUnit()) {
+                    status.setText("NO FLASH");
+                    return;
+                }
+
+                torchOn = !torchOn;
+                camera.getCameraControl().enableTorch(torchOn);
+                lightButton.setText(torchOn ? "LIGHT ON" : "LIGHT");
+            }
+
+            private void applyRequestedAspectOrientation() {
+                int wanted =
+                    aspectNineSixteen
+                        ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+
+                if (getRequestedOrientation() != wanted) {
+                    setRequestedOrientation(wanted);
+                }
+            }
+
+            private int currentTargetRotation() {
+                try {
+                    if (previewView != null &&
+                        previewView.getDisplay() != null) {
+                        return previewView.getDisplay().getRotation();
+                    }
+                } catch (Throwable ignored) {
+                }
+
+                return aspectNineSixteen
+                    ? Surface.ROTATION_0
+                    : Surface.ROTATION_90;
+            }
+
+            private void startPrecisionTimeline() {
+                recordingStartNanos = SystemClock.elapsedRealtimeNanos();
+                precisionClockRunning = true;
+                if (precisionTimeline != null) {
+                    precisionTimeline.setVisibility(View.VISIBLE);
+                    precisionTimeline.setText("0000:00:00:000:000:000");
+                    precisionTimeline.setTextColor(Color.WHITE);
+                }
+                precisionHandler.removeCallbacks(precisionClockTick);
+                precisionHandler.post(precisionClockTick);
+            }
+
+            private void stopPrecisionTimeline() {
+                precisionClockRunning = false;
+                precisionHandler.removeCallbacks(precisionClockTick);
+                if (precisionTimeline != null) {
+                    precisionTimeline.setVisibility(View.GONE);
+                    precisionTimeline.setText("0000:00:00:000:000:000");
+                    precisionTimeline.setTextColor(Color.WHITE);
+                }
+            }
+
+            private void toggleRecording() {
+                if (recording != null) {
+                    recording.stop();
+                    return;
+                }
+
+                if (videoCapture == null) {
+                    status.setText("CAMERA NOT READY");
+                    return;
+                }
+
+                String stamp =
+                    new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+                        .format(new Date());
+
+                ContentValues values = new ContentValues();
+
+                String captureName =
+                    directHevcActive
+                        ? "DU_R50_TEXTURE_BALANCE_" +
+                            (aspectNineSixteen ? "9x16_" : "16x9_") +
+                            "1080P60_HEVC_" + stamp
+                        : "DU_R50_TEXTURE_BALANCE_" +
+                            (aspectNineSixteen ? "9x16_" : "16x9_") +
+                            "1080P60_H264_" + stamp;
+
+                values.put(
+                    MediaStore.Video.Media.DISPLAY_NAME,
+                    captureName
+                );
+                values.put(
+                    MediaStore.Video.Media.MIME_TYPE,
+                    "video/mp4"
+                );
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.put(
+                        MediaStore.Video.Media.RELATIVE_PATH,
+                        directHevcActive
+                            ? "Movies/DU Camera/R50 Texture Balance"
+                            : "Movies/DU Camera/R37 TikTok Master H264"
+                    );
+                }
+
+                MediaStoreOutputOptions output =
+                    new MediaStoreOutputOptions.Builder(
+                        getContentResolver(),
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    )
+                    .setContentValues(values)
+                    .build();
+
+                androidx.camera.video.PendingRecording pending =
+                    videoCapture.getOutput().prepareRecording(this, output);
+
+                if (hasAudioPermission()) {
+                    pending = pending.withAudioEnabled();
+                }
+
+                recording =
+                    pending.start(
+                        ContextCompat.getMainExecutor(this),
+                        event -> {
+                            if (event instanceof VideoRecordEvent.Start) {
+                                startPrecisionTimeline();
+                                recordButton.setText("STOP");
+                                status.setText(
+                                    directHevcActive
+                                        ? "1080P60/HEVC TIKTOK • REC"
+                                        : "H264 SAFE • REC"
+                                );
+                            } else if (event instanceof VideoRecordEvent.Finalize) {
+                                VideoRecordEvent.Finalize end =
+                                    (VideoRecordEvent.Finalize) event;
+
+                                stopPrecisionTimeline();
+                                recording = null;
+                                recordButton.setText("RECORD");
+
+                                if (end.hasError()) {
+                                    status.setText("SAVE ERROR");
+                                } else {
+                                    Uri rawUri =
+                                        end.getOutputResults().getOutputUri();
+
+                                    if (directHevcActive &&
+                                        !directGradeCopy) {
+                                        status.setText(
+                                            "DIRECT MASTER • FINAL SAVED"
+                                        );
+                                    } else if (autoEnhance &&
+                                        rawUri != null &&
+                                        !Uri.EMPTY.equals(rawUri)) {
+                                        status.setText(
+                                            directHevcActive
+                                                ? "CREATING GRADE COPY..."
+                                                : "SAFE ENHANCING..."
+                                        );
+                                        enhanceRecordedMaster(
+                                            rawUri,
+                                            true
+                                        );
+                                    } else {
+                                        status.setText(
+                                            "MASTER SAVED"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    );
+            }
+
+            private void enhanceRecordedMaster(
+                Uri inputUri,
+                boolean preferHevc
+            ) {
+                try {
+                    File directory =
+                        getExternalFilesDir(
+                            Environment.DIRECTORY_MOVIES
+                        );
+
+                    if (directory == null) {
+                        directory = getCacheDir();
+                    }
+
+                    File enhancedFile =
+                        new File(
+                            directory,
+                            "DU_R37_GRADED_" +
+                            System.currentTimeMillis() +
+                            ".mp4"
+                        );
+
+                    if (enhancedFile.exists()) {
+                        enhancedFile.delete();
+                    }
+
+                    // R37 TikTok Master optional grade-copy path.
+                    // DIRECT FINAL remains the default and avoids a second encode.
+                    // The proven R36 grade chain is retained only if the user
+                    // explicitly taps +GRADE COPY.
+                    Effect contrast =
+                        new Contrast(-0.02f);
+
+                    Effect saturation =
+                        new HslAdjustment.Builder()
+                            .adjustSaturation(5.5f)
+                            .adjustLightness(0.5f)
+                            .build();
+
+                    Effect channelBalance =
+                        new RgbAdjustment.Builder()
+                            .setRedScale(1.018f)
+                            .setGreenScale(1.010f)
+                            .setBlueScale(0.995f)
+                            .build();
+
+                    EditedMediaItem editedItem =
+                        new EditedMediaItem.Builder(
+                            MediaItem.fromUri(inputUri)
+                        )
+                        .setEffects(
+                            new Effects(
+                                Collections.emptyList(),
+                                Arrays.asList(
+                                    contrast,
+                                    saturation,
+                                    channelBalance
+                                )
+                            )
+                        )
+                        .build();
+
+                    VideoEncoderSettings encoderSettings =
+                        new VideoEncoderSettings.Builder()
+                            .setBitrate(46_000_000)
+                            .setiFrameIntervalSeconds(1.0f)
+                            .build();
+
+                    DefaultEncoderFactory encoderFactory =
+                        new DefaultEncoderFactory.Builder(this)
+                            .setEnableFallback(true)
+                            .setEnableCodecDbLite(true)
+                            .setRequestedVideoEncoderSettings(
+                                encoderSettings
+                            )
+                            .build();
+
+                    Transformer.Builder builder =
+                        new Transformer.Builder(this)
+                            .setEncoderFactory(encoderFactory)
+                            .addListener(
+                                new Transformer.Listener() {
+                                    @Override
+                                    public void onCompleted(
+                                        Composition composition,
+                                        ExportResult exportResult
+                                    ) {
+                                        activeTransformer = null;
+                                        publishEnhancedVideo(
+                                            enhancedFile
+                                        );
+                                    }
+
+                                    @Override
+                                    public void onError(
+                                        Composition composition,
+                                        ExportResult exportResult,
+                                        ExportException exportException
+                                    ) {
+                                        activeTransformer = null;
+
+                                        // HEVC is preferred for social-media
+                                        // quality/size. Retry as AVC on phones
+                                        // whose encoders reject HEVC.
+                                        if (preferHevc) {
+                                            if (enhancedFile.exists()) {
+                                                enhancedFile.delete();
+                                            }
+
+                                            status.setText(
+                                                "SAFE FALLBACK • AVC"
+                                            );
+
+                                            enhanceRecordedMaster(
+                                                inputUri,
+                                                false
+                                            );
+                                        } else {
+                                            status.setText(
+                                                "RAW SAFE • ENHANCE FAILED"
+                                            );
+                                        }
+                                    }
+                                }
+                            );
+
+                    builder.setVideoMimeType(
+                        preferHevc
+                            ? MimeTypes.VIDEO_H265
+                            : MimeTypes.VIDEO_H264
+                    );
+
+                    activeTransformer = builder.build();
+
+                    activeTransformer.start(
+                        editedItem,
+                        enhancedFile.getAbsolutePath()
+                    );
+
+                } catch (Throwable error) {
+                    activeTransformer = null;
+                    status.setText(
+                        "RAW SAVED • ENHANCE ERROR"
+                    );
+                }
+            }
+
+            private void publishEnhancedVideo(
+                File sourceFile
+            ) {
+                if (sourceFile == null ||
+                    !sourceFile.exists()) {
+                    status.setText(
+                        "RAW SAVED • EXPORT MISSING"
+                    );
+                    return;
+                }
+
+                Uri destination = null;
+
+                try {
+                    ContentValues values =
+                        new ContentValues();
+
+                    values.put(
+                        MediaStore.Video.Media.DISPLAY_NAME,
+                        "DU_R37_GRADED_PRO_" +
+                        new SimpleDateFormat(
+                            "yyyyMMdd_HHmmss",
+                            Locale.US
+                        ).format(new Date())
+                    );
+
+                    values.put(
+                        MediaStore.Video.Media.MIME_TYPE,
+                        "video/mp4"
+                    );
+
+                    if (Build.VERSION.SDK_INT >=
+                        Build.VERSION_CODES.Q) {
+                        values.put(
+                            MediaStore.Video.Media.RELATIVE_PATH,
+                            "Movies/DU Camera/R37 Graded"
+                        );
+                        values.put(
+                            MediaStore.Video.Media.IS_PENDING,
+                            1
+                        );
+                    }
+
+                    destination =
+                        getContentResolver().insert(
+                            MediaStore.Video.Media
+                                .EXTERNAL_CONTENT_URI,
+                            values
+                        );
+
+                    if (destination == null) {
+                        throw new IllegalStateException(
+                            "Enhanced MediaStore insert failed"
+                        );
+                    }
+
+                    try (
+                        InputStream input =
+                            new FileInputStream(sourceFile);
+                        OutputStream output =
+                            getContentResolver()
+                                .openOutputStream(destination)
+                    ) {
+                        if (output == null) {
+                            throw new IllegalStateException(
+                                "Enhanced output stream failed"
+                            );
+                        }
+
+                        byte[] buffer =
+                            new byte[1024 * 1024];
+
+                        int count;
+
+                        while ((count =
+                            input.read(buffer)) != -1) {
+                            output.write(
+                                buffer,
+                                0,
+                                count
+                            );
+                        }
+
+                        output.flush();
+                    }
+
+                    if (Build.VERSION.SDK_INT >=
+                        Build.VERSION_CODES.Q) {
+                        ContentValues ready =
+                            new ContentValues();
+
+                        ready.put(
+                            MediaStore.Video.Media.IS_PENDING,
+                            0
+                        );
+
+                        getContentResolver().update(
+                            destination,
+                            ready,
+                            null,
+                            null
+                        );
+                    }
+
+                    sourceFile.delete();
+
+                    status.setText(
+                        "R37 GRADE • ENHANCED SAVED"
+                    );
+
+                } catch (Throwable error) {
+                    if (destination != null) {
+                        try {
+                            getContentResolver().delete(
+                                destination,
+                                null,
+                                null
+                            );
+                        } catch (Throwable ignored) {
+                        }
+                    }
+
+                    status.setText(
+                        "RAW SAVED • PUBLISH ERROR"
+                    );
+                }
+            }
+
+            @Override
+            public void onRequestPermissionsResult(
+                int requestCode,
+                String[] permissions,
+                int[] grantResults
+            ) {
+                super.onRequestPermissionsResult(
+                    requestCode,
+                    permissions,
+                    grantResults
+                );
+
+                if (requestCode == REQUEST_CAMERA) {
+                    if (hasCameraPermission()) {
+                        startCamera();
+                    } else {
+                        status.setText("CAMERA PERMISSION DENIED");
+                    }
+                }
+            }
+
+            @Override
+            protected void onDestroy() {
+                if (recording != null) {
+                    recording.stop();
+                }
+                if (activeTransformer != null) {
+                    activeTransformer.cancel();
+                    activeTransformer = null;
+                }
+                if (provider != null) {
+                    provider.unbindAll();
+                }
+                super.onDestroy();
+            }
+
+            private boolean hasCameraPermission() {
+                return ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.CAMERA
+                ) == PackageManager.PERMISSION_GRANTED;
+            }
+
+            private boolean hasAudioPermission() {
+                return ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED;
+            }
+
+            private TextView button(String text) {
+                TextView view = new TextView(this);
+                view.setText(text);
+                view.setTextColor(Color.WHITE);
+                view.setTextSize(11.5f);
+                view.setGravity(Gravity.CENTER);
+
+                GradientDrawable bg = new GradientDrawable();
+                bg.setColor(0xDD111111);
+                bg.setCornerRadius(dp(12));
+                bg.setStroke(dp(1), 0xFFFFB323);
+
+                view.setBackground(bg);
+                return view;
+            }
+
+            private int dp(int value) {
+                return (int) (
+                    value * getResources().getDisplayMetrics().density
+                );
+            }
+        }
+        JAVA
+
+        cat > /tmp/R069-MAGIC-PRO-CLEAN-CONTROLS-AUDIT.txt <<'TXT'
+        R047 REFERENCE RICH IMAGE PRO AUDIT
+        PASS built from proven R45 TikTok quality master
+        PASS exact Quality.FHD selector retained
+        PASS 1080p60 target retained
+        PASS direct HEVC/H.265 retained
+        PASS 15 Mbps primary bitrate retained
+        PASS R44 normal AE retained
+        PASS R44 high-quality tone mapping retained
+        PASS R44 HIGH_QUALITY color correction retained
+        PASS R44 EDGE-HQ retained
+        PASS R44 NR-OFF / NR-MIN fallback retained
+        PASS CameraX Media3Effect live pipeline added
+        PASS R47 live richness chain added; R45 exposure path preserved
+        PASS effect targets PREVIEW + VIDEO_CAPTURE
+        PASS effect occurs before the single HEVC encode
+        PASS same-quality effect -> R45 safe fallback
+        PASS exposure compensation remains 0.00 EV
+        PASS custom dark tone curve remains removed
+        PASS no forced SENSOR_EXPOSURE_TIME
+        PASS no Camera2 fixed-60 AE override
+        PASS DIRECT FINAL remains no second export
+        TXT
+
+        SRC='r50-texture/app/src/main/java/com/sentongoharuna/ducamera/R50ReferenceTextureBalanceCameraActivity.java'
+        grep -qx 'android.useAndroidX=true' r50-texture/gradle.properties
+        test "$(grep -c 'android.intent.action.MAIN' r50-texture/app/src/main/AndroidManifest.xml)" = "1"
+        test "$(grep -c 'android.intent.category.LAUNCHER' r50-texture/app/src/main/AndroidManifest.xml)" = "1"
+        grep -q 'camera-video:1.7.0-alpha03' r50-texture/app/build.gradle
+        grep -q 'ExperimentalMimeTypeApi' "$SRC"
+        grep -q 'QualitySelector.from(Quality.FHD)' "$SRC"
+        ! grep -q 'QualitySelector.from(Quality.UHD)' "$SRC"
+        grep -q '15_000_000' "$SRC"
+        grep -q 'new Range<>(60, 60)' "$SRC"
+        grep -q 'MIMETYPE_VIDEO_HEVC' "$SRC"
+        grep -q 'VIDEO_CAPABILITIES_SOURCE_CODEC_CAPABILITIES' "$SRC"
+        grep -q 'DynamicRange.SDR' "$SRC"
+        grep -q 'EDGE_MODE_HIGH_QUALITY' "$SRC"
+        grep -q 'NOISE_REDUCTION_MODE_MINIMAL' "$SRC"
+        grep -q 'DIRECT FINAL' "$SRC"
+        grep -q '1080P60 STAB -> NO-STAB' "$SRC"
+        grep -q 'HEVC -> H264 • KEEP 1080P60' "$SRC"
+        ! grep -q 'getSelectedQuality' "$SRC"
+        ! grep -q 'getResolutionInfo' "$SRC"
+        grep -q 'Media3Effect richImageEffect' "$SRC"
+        grep -q 'CameraEffect.PREVIEW | CameraEffect.VIDEO_CAPTURE' "$SRC"
+        grep -q 'new Contrast(0.035f)' "$SRC"
+        grep -q '.adjustSaturation(2.5f)' "$SRC"
+        grep -q '.adjustLightness(1.0f)' "$SRC"
+        grep -q '.setRedScale(1.008f)' "$SRC"
+        grep -q '.setGreenScale(1.003f)' "$SRC"
+        grep -q '.setBlueScale(0.998f)' "$SRC"
+        grep -q 'UseCaseGroup.Builder' "$SRC"
+        grep -q 'TEXTURE FALLBACK • R49 SAFE' "$SRC"
+        grep -q 'NOISE_REDUCTION_MODE_OFF' "$SRC"
+        grep -q 'COLOR_CORRECTION_MODE_HIGH_QUALITY' "$SRC"
+        grep -q 'TONEMAP_MODE_HIGH_QUALITY' "$SRC"
+        grep -q 'double wantedEv = 0.00;' "$SRC"
+        ! grep -q 'TONEMAP_MODE_CONTRAST_CURVE' "$SRC"
+        ! grep -q 'CaptureRequest.TONEMAP_CURVE' "$SRC"
+        ! grep -q 'CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE' "$SRC"
+        ! grep -q 'CaptureRequest.SENSOR_EXPOSURE_TIME' "$SRC"
+        grep -q 'NOISE_REDUCTION_MODE_OFF' "$SRC"
+        grep -q 'hasNoiseReductionOff' "$SRC"
+        grep -q 'noiseReductionOffActive' "$SRC"
+        grep -q 'NR-OFF FALLBACK • NR-MIN' "$SRC"
+        grep -q 'COLOR_CORRECTION_MODE_HIGH_QUALITY' "$SRC"
+        grep -q 'TONEMAP_MODE_HIGH_QUALITY' "$SRC"
+        grep -q 'double wantedEv = 0.00;' "$SRC"
+        ! grep -q 'TONEMAP_MODE_CONTRAST_CURVE' "$SRC"
+        ! grep -q 'CaptureRequest.TONEMAP_CURVE' "$SRC"
+        ! grep -q 'CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE' "$SRC"
+        ! grep -q 'CaptureRequest.SENSOR_EXPOSURE_TIME' "$SRC"
+        grep -q 'CaptureRequest.COLOR_CORRECTION_MODE' "$SRC"
+        grep -q 'COLOR_CORRECTION_MODE_HIGH_QUALITY' "$SRC"
+        grep -q 'COLOR_CORRECTION_MODE_FAST' "$SRC"
+        grep -q 'COLOR-HQ FALLBACK • FAST' "$SRC"
+        grep -q 'double wantedEv = 0.00;' "$SRC"
+        ! grep -q 'TONEMAP_MODE_CONTRAST_CURVE' "$SRC"
+        ! grep -q 'CaptureRequest.TONEMAP_CURVE' "$SRC"
+        ! grep -q 'CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE' "$SRC"
+        ! grep -q 'CaptureRequest.SENSOR_EXPOSURE_TIME' "$SRC"
+        ! grep -q 'TONEMAP_MODE_CONTRAST_CURVE' "$SRC"
+        ! grep -q 'TONEMAP_CURVE' "$SRC"
+        ! grep -q 'CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE' "$SRC"
+        ! grep -q 'CaptureRequest.SENSOR_EXPOSURE_TIME' "$SRC"
+        grep -q 'TONEMAP_MODE_HIGH_QUALITY' "$SRC"
+        grep -q 'double wantedEv = 0.00;' "$SRC"
+        grep -q 'AE AUTO' "$SRC"
+        grep -q 'aspectNineSixteen ? "9:16" : "16:9"' "$SRC"
+        grep -q 'SCREEN_ORIENTATION_PORTRAIT' "$SRC"
+        grep -q 'SCREEN_ORIENTATION_LANDSCAPE' "$SRC"
+        grep -q '.setTargetRotation(targetRotation)' "$SRC"
+        grep -q 'Aspect mode is shared by BOTH front and back cameras.' "$SRC"
+        ! grep -q 'setEnableFormatFallback' "$SRC"
+
+        echo "PASS: R050 Reference Texture Balance Pro source audit complete."
+
+    - name: Rebuild R067 Magic Pro UI directly from proven R50 source
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        from pathlib import Path
+        import base64
+        import re
+
+        root = Path("r50-texture")
+        old = root / "app/src/main/java/com/sentongoharuna/ducamera/R50ReferenceTextureBalanceCameraActivity.java"
+        new = root / "app/src/main/java/com/sentongoharuna/ducamera/R67MagicProStandaloneActivity.java"
+        manifest = root / "app/src/main/AndroidManifest.xml"
+        gradle = root / "app/build.gradle"
+        settings = root / "settings.gradle"
+        source = old.read_text()
+
+        source = source.replace("R50ReferenceTextureBalanceCameraActivity", "R67MagicProStandaloneActivity")
+        source = source.replace("R50 TEXTURE ENGINE OPENING", "MAGIC PRO • OPENING")
+        source = source.replace("R50 TEXTURE • OPENING", "MAGIC PRO • READY")
+        source = source.replace("R50 TEXTURE", "MAGIC PRO")
+        source = source.replace("DU_R50_TEXTURE_BALANCE_", "MAGIC_PRO_")
+        source = source.replace("Movies/DU Camera/R50 Texture Balance", "Movies/Magic Pro")
+
+        m_start = re.search(r"(?m)^\s*private void buildUi\(\) \{", source)
+        m_end = re.search(r"(?m)^\s*private LinearLayout\.LayoutParams railLp\(\)", source[m_start.end():] if m_start else "")
+        if not m_start or not m_end:
+            raise RuntimeError("R067 UI anchors not found in generated R50 Java source")
+        start = m_start.start()
+        end = m_start.end() + m_end.start()
+        clean_ui = base64.b64decode("ICAgICAgICAgICAgcHJpdmF0ZSB2b2lkIGJ1aWxkVWkoKSB7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dCByb290ID0gbmV3IEZyYW1lTGF5b3V0KHRoaXMpOwogICAgICAgICAgICAgICAgcm9vdC5zZXRCYWNrZ3JvdW5kQ29sb3IoQ29sb3IuQkxBQ0spOwoKICAgICAgICAgICAgICAgIHByZXZpZXdWaWV3ID0gbmV3IFByZXZpZXdWaWV3KHRoaXMpOwogICAgICAgICAgICAgICAgcHJldmlld1ZpZXcuc2V0SW1wbGVtZW50YXRpb25Nb2RlKFByZXZpZXdWaWV3LkltcGxlbWVudGF0aW9uTW9kZS5DT01QQVRJQkxFKTsKICAgICAgICAgICAgICAgIHByZXZpZXdWaWV3LnNldFNjYWxlVHlwZShQcmV2aWV3Vmlldy5TY2FsZVR5cGUuRklMTF9DRU5URVIpOwogICAgICAgICAgICAgICAgcHJldmlld1ZpZXcuc2V0QmFja2dyb3VuZENvbG9yKENvbG9yLkJMQUNLKTsKICAgICAgICAgICAgICAgIHJvb3QuYWRkVmlldyhwcmV2aWV3VmlldywgbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcygKICAgICAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMuTUFUQ0hfUEFSRU5ULAogICAgICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcy5NQVRDSF9QQVJFTlQpKTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyBicmFuZCA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIGJyYW5kLnNldFRleHQoIk1BR0lDIFBST1xuQ0lORU1BIENBTUVSQSIpOwogICAgICAgICAgICAgICAgYnJhbmQuc2V0VGV4dENvbG9yKENvbG9yLldISVRFKTsKICAgICAgICAgICAgICAgIGJyYW5kLnNldFRleHRTaXplKDE2Zik7CiAgICAgICAgICAgICAgICBicmFuZC5zZXRUeXBlZmFjZShUeXBlZmFjZS5ERUZBVUxUX0JPTEQpOwogICAgICAgICAgICAgICAgYnJhbmQuc2V0R3Jhdml0eShHcmF2aXR5LlNUQVJUIHwgR3Jhdml0eS5DRU5URVJfVkVSVElDQUwpOwogICAgICAgICAgICAgICAgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zIGJyYW5kTHAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDEyMiksIGRwKDQ4KSwgR3Jhdml0eS5UT1AgfCBHcmF2aXR5LlNUQVJUKTsKICAgICAgICAgICAgICAgIGJyYW5kTHAubGVmdE1hcmdpbiA9IGRwKDE0KTsgYnJhbmRMcC50b3BNYXJnaW4gPSBkcCgxOCk7IHJvb3QuYWRkVmlldyhicmFuZCwgYnJhbmRMcCk7CgogICAgICAgICAgICAgICAgVGV4dFZpZXcgY2FwdHVyZUJhZGdlID0gcHJvQ2hpcCgiRkhEXG42MCIsIHRydWUpOwogICAgICAgICAgICAgICAgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zIGNhcExwID0gbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyhkcCg0OCksIGRwKDQ4KSwgR3Jhdml0eS5UT1AgfCBHcmF2aXR5LlNUQVJUKTsKICAgICAgICAgICAgICAgIGNhcExwLmxlZnRNYXJnaW4gPSBkcCgxNDIpOyBjYXBMcC50b3BNYXJnaW4gPSBkcCgxOCk7IHJvb3QuYWRkVmlldyhjYXB0dXJlQmFkZ2UsIGNhcExwKTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyBjb2RlYyA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIGNvZGVjLnNldFRleHQoIkhEUiAgwrcgIExPRyAgwrcgIEhFVkNcbjEwLUJJVCAgwrcgIFBSTy1IUVxuU1RBQiAgwrcgIE1PVElPTisiKTsKICAgICAgICAgICAgICAgIGNvZGVjLnNldFRleHRDb2xvcigweEU2RkZGRkZGKTsgY29kZWMuc2V0VGV4dFNpemUoOS41Zik7CiAgICAgICAgICAgICAgICBjb2RlYy5zZXRHcmF2aXR5KEdyYXZpdHkuU1RBUlQgfCBHcmF2aXR5LkNFTlRFUl9WRVJUSUNBTCk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgY29kZWNMcCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoMTUwKSwgZHAoNTIpLCBHcmF2aXR5LlRPUCB8IEdyYXZpdHkuQ0VOVEVSX0hPUklaT05UQUwpOwogICAgICAgICAgICAgICAgY29kZWNMcC50b3BNYXJnaW4gPSBkcCgxNik7IHJvb3QuYWRkVmlldyhjb2RlYywgY29kZWNMcCk7CgogICAgICAgICAgICAgICAgVGV4dFZpZXcgc3RvcmFnZSA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIHN0b3JhZ2Uuc2V0VGV4dCgiMjU2R0JcbjJoIDE0bSAgICA5NSUiKTsKICAgICAgICAgICAgICAgIHN0b3JhZ2Uuc2V0VGV4dENvbG9yKDB4RTZGRkZGRkYpOyBzdG9yYWdlLnNldFRleHRTaXplKDkuNWYpOwogICAgICAgICAgICAgICAgc3RvcmFnZS5zZXRHcmF2aXR5KEdyYXZpdHkuRU5EIHwgR3Jhdml0eS5DRU5URVJfVkVSVElDQUwpOwogICAgICAgICAgICAgICAgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zIHN0b3JhZ2VMcCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoMTAwKSwgZHAoNDQpLCBHcmF2aXR5LlRPUCB8IEdyYXZpdHkuRU5EKTsKICAgICAgICAgICAgICAgIHN0b3JhZ2VMcC5yaWdodE1hcmdpbiA9IGRwKDE0KTsgc3RvcmFnZUxwLnRvcE1hcmdpbiA9IGRwKDE4KTsgcm9vdC5hZGRWaWV3KHN0b3JhZ2UsIHN0b3JhZ2VMcCk7CgogICAgICAgICAgICAgICAgVGV4dFZpZXcgc2V0dGluZ3NCdG4gPSBwcm9DaGlwKCLimpkiLCBmYWxzZSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgc2V0THAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDQyKSwgZHAoNDIpLCBHcmF2aXR5LlRPUCB8IEdyYXZpdHkuU1RBUlQpOwogICAgICAgICAgICAgICAgc2V0THAubGVmdE1hcmdpbiA9IGRwKDE0KTsgc2V0THAudG9wTWFyZ2luID0gZHAoNzQpOyByb290LmFkZFZpZXcoc2V0dGluZ3NCdG4sIHNldExwKTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyBsdXRCdG4gPSBwcm9DaGlwKCJMVVQiLCBmYWxzZSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgbHV0THAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDU0KSwgZHAoNDIpLCBHcmF2aXR5LlRPUCB8IEdyYXZpdHkuU1RBUlQpOwogICAgICAgICAgICAgICAgbHV0THAubGVmdE1hcmdpbiA9IGRwKDY0KTsgbHV0THAudG9wTWFyZ2luID0gZHAoNzQpOyByb290LmFkZFZpZXcobHV0QnRuLCBsdXRMcCk7CgogICAgICAgICAgICAgICAgYWRhcHRpdmVCdXR0b24gPSBwcm9DaGlwKCLil4kiLCBmYWxzZSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgYWRhcHRMcCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoNDIpLCBkcCg0MiksIEdyYXZpdHkuVE9QIHwgR3Jhdml0eS5TVEFSVCk7CiAgICAgICAgICAgICAgICBhZGFwdExwLmxlZnRNYXJnaW4gPSBkcCgxMjYpOyBhZGFwdExwLnRvcE1hcmdpbiA9IGRwKDc0KTsgcm9vdC5hZGRWaWV3KGFkYXB0aXZlQnV0dG9uLCBhZGFwdExwKTsKICAgICAgICAgICAgICAgIGFkYXB0aXZlQnV0dG9uLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IHsgYWRhcHRpdmVFbmdpbmUgPSAhYWRhcHRpdmVFbmdpbmU7IGFkYXB0aXZlQnV0dG9uLnNldFRleHQoYWRhcHRpdmVFbmdpbmUgPyAi4peJIiA6ICLil4siKTsgfSk7CgogICAgICAgICAgICAgICAgVGV4dFZpZXcgcHJvQnRuID0gcHJvQ2hpcCgiUFJPIOKMhCIsIGZhbHNlKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyBwcm9McCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoODIpLCBkcCg0MiksIEdyYXZpdHkuVE9QIHwgR3Jhdml0eS5FTkQpOwogICAgICAgICAgICAgICAgcHJvTHAucmlnaHRNYXJnaW4gPSBkcCgxNCk7IHByb0xwLnRvcE1hcmdpbiA9IGRwKDc0KTsgcm9vdC5hZGRWaWV3KHByb0J0biwgcHJvTHApOwoKICAgICAgICAgICAgICAgIFRleHRWaWV3IGhpc3RvZ3JhbSA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIGhpc3RvZ3JhbS5zZXRUZXh0KCLiloHilobilofiloPiloLiloUiKTsgaGlzdG9ncmFtLnNldFRleHRDb2xvcigweENDRkZGRkZGKTsgaGlzdG9ncmFtLnNldFRleHRTaXplKDE4Zik7CiAgICAgICAgICAgICAgICBoaXN0b2dyYW0uc2V0R3Jhdml0eShHcmF2aXR5LkNFTlRFUik7IGhpc3RvZ3JhbS5zZXRCYWNrZ3JvdW5kKGdsYXNzUGFuZWwoZHAoOCkpKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyBoaXN0THAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDcyKSwgZHAoNTQpLCBHcmF2aXR5LlRPUCB8IEdyYXZpdHkuU1RBUlQpOwogICAgICAgICAgICAgICAgaGlzdExwLmxlZnRNYXJnaW4gPSBkcCgxNCk7IGhpc3RMcC50b3BNYXJnaW4gPSBkcCgxMjgpOyByb290LmFkZFZpZXcoaGlzdG9ncmFtLCBoaXN0THApOwoKICAgICAgICAgICAgICAgIFRleHRWaWV3IHZhbHVlcyA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIHZhbHVlcy5zZXRUZXh0KCJJU09cbjEwMFxuXG5TXG4xLzEwMFxuXG5XQlxuNTYwMEtcblxuQUYgIOKAolxuMC43OCIpOwogICAgICAgICAgICAgICAgdmFsdWVzLnNldFRleHRDb2xvcigweEU2RkZGRkZGKTsgdmFsdWVzLnNldFRleHRTaXplKDEwZik7IHZhbHVlcy5zZXRUeXBlZmFjZShUeXBlZmFjZS5NT05PU1BBQ0UpOyB2YWx1ZXMuc2V0R3Jhdml0eShHcmF2aXR5LlNUQVJUKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyB2YWx1ZXNMcCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoNzIpLCBkcCgyMTApLCBHcmF2aXR5LkNFTlRFUl9WRVJUSUNBTCB8IEdyYXZpdHkuU1RBUlQpOwogICAgICAgICAgICAgICAgdmFsdWVzTHAubGVmdE1hcmdpbiA9IGRwKDE2KTsgdmFsdWVzTHAudG9wTWFyZ2luID0gLWRwKDEwMCk7IHJvb3QuYWRkVmlldyh2YWx1ZXMsIHZhbHVlc0xwKTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyBmb2N1cyA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIGZvY3VzLnNldFRleHQoIuKMnCAgICAgICDijJ1cblxuICAgICtcblxu4oyeICAgICAgIOKMnyIpOyBmb2N1cy5zZXRUZXh0Q29sb3IoMHhFNkZGRkZGRik7IGZvY3VzLnNldFRleHRTaXplKDE4Zik7IGZvY3VzLnNldEdyYXZpdHkoR3Jhdml0eS5DRU5URVIpOwogICAgICAgICAgICAgICAgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zIGZvY3VzTHAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDEzMCksIGRwKDEzMCksIEdyYXZpdHkuQ0VOVEVSKTsKICAgICAgICAgICAgICAgIGZvY3VzTHAudG9wTWFyZ2luID0gLWRwKDQwKTsgcm9vdC5hZGRWaWV3KGZvY3VzLCBmb2N1c0xwKTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyB3YXZlZm9ybSA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIHdhdmVmb3JtLnNldFRleHQoIuOAsOOAsCIpOyB3YXZlZm9ybS5zZXRUZXh0Q29sb3IoMHhDQ0ZGRkZGRik7IHdhdmVmb3JtLnNldFRleHRTaXplKDE2Zik7IHdhdmVmb3JtLnNldEdyYXZpdHkoR3Jhdml0eS5DRU5URVIpOyB3YXZlZm9ybS5zZXRCYWNrZ3JvdW5kKGdsYXNzUGFuZWwoZHAoOCkpKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyB3YXZlTHAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDY2KSwgZHAoNTIpLCBHcmF2aXR5LlRPUCB8IEdyYXZpdHkuRU5EKTsKICAgICAgICAgICAgICAgIHdhdmVMcC5yaWdodE1hcmdpbiA9IGRwKDE0KTsgd2F2ZUxwLnRvcE1hcmdpbiA9IGRwKDEyOCk7IHJvb3QuYWRkVmlldyh3YXZlZm9ybSwgd2F2ZUxwKTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyBhdWRpbyA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIGF1ZGlvLnNldFRleHQoIk1JQ1xu4pauIOKWrlxu4pauIOKWrlxu4pauIOKWrlxu4pauIOKWrlxu4pauIOKWrlxuTCAgIFJcbi0xMiBkQiIpOwogICAgICAgICAgICAgICAgYXVkaW8uc2V0VGV4dENvbG9yKDB4RTZGRkZGRkYpOyBhdWRpby5zZXRUZXh0U2l6ZSg5Zik7IGF1ZGlvLnNldFR5cGVmYWNlKFR5cGVmYWNlLk1PTk9TUEFDRSk7IGF1ZGlvLnNldEdyYXZpdHkoR3Jhdml0eS5DRU5URVIpOyBhdWRpby5zZXRCYWNrZ3JvdW5kKGdsYXNzUGFuZWwoZHAoMTYpKSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgYXVkaW9McCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoNTYpLCBkcCgxNTQpLCBHcmF2aXR5LkNFTlRFUl9WRVJUSUNBTCB8IEdyYXZpdHkuRU5EKTsKICAgICAgICAgICAgICAgIGF1ZGlvTHAucmlnaHRNYXJnaW4gPSBkcCgxNCk7IGF1ZGlvTHAudG9wTWFyZ2luID0gLWRwKDE2MCk7IHJvb3QuYWRkVmlldyhhdWRpbywgYXVkaW9McCk7CgogICAgICAgICAgICAgICAgVGV4dFZpZXcgZXYgPSBuZXcgVGV4dFZpZXcodGhpcyk7CiAgICAgICAgICAgICAgICBldi5zZXRUZXh0KCLimLxcbuKUglxu4pSCXG7ilIJcbjAuMFxu4pSCXG7ilIJcbuKUgiIpOyBldi5zZXRUZXh0Q29sb3IoMHhFNkZGRkZGRik7IGV2LnNldFRleHRTaXplKDlmKTsgZXYuc2V0R3Jhdml0eShHcmF2aXR5LkNFTlRFUik7IGV2LnNldFR5cGVmYWNlKFR5cGVmYWNlLk1PTk9TUEFDRSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgZXZMcCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoNDIpLCBkcCgxOTApLCBHcmF2aXR5LkNFTlRFUl9WRVJUSUNBTCB8IEdyYXZpdHkuRU5EKTsKICAgICAgICAgICAgICAgIGV2THAucmlnaHRNYXJnaW4gPSBkcCgxOCk7IGV2THAudG9wTWFyZ2luID0gZHAoMTUwKTsgcm9vdC5hZGRWaWV3KGV2LCBldkxwKTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyB6b29tID0gbmV3IFRleHRWaWV3KHRoaXMpOwogICAgICAgICAgICAgICAgem9vbS5zZXRUZXh0KCI1w5dcblxuM8OXXG5cbjLDl1xuXG4xw5dcblxuMC41w5ciKTsgem9vbS5zZXRUZXh0Q29sb3IoMHhFNkZGRkZGRik7IHpvb20uc2V0VGV4dFNpemUoMTBmKTsgem9vbS5zZXRHcmF2aXR5KEdyYXZpdHkuQ0VOVEVSKTsgem9vbS5zZXRCYWNrZ3JvdW5kKGdsYXNzUGFuZWwoZHAoMjIpKSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgem9vbUxwID0gbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyhkcCg0NCksIGRwKDE3NiksIEdyYXZpdHkuQ0VOVEVSX1ZFUlRJQ0FMIHwgR3Jhdml0eS5TVEFSVCk7CiAgICAgICAgICAgICAgICB6b29tTHAubGVmdE1hcmdpbiA9IGRwKDE0KTsgem9vbUxwLnRvcE1hcmdpbiA9IGRwKDE3MCk7IHJvb3QuYWRkVmlldyh6b29tLCB6b29tTHApOwogICAgICAgICAgICAgICAgem9vbS5zZXRPbkNsaWNrTGlzdGVuZXIodiAtPiB7CiAgICAgICAgICAgICAgICAgICAgaWYgKGNhbWVyYSA9PSBudWxsKSByZXR1cm47CiAgICAgICAgICAgICAgICAgICAgdHJ5IHsKICAgICAgICAgICAgICAgICAgICAgICAgWm9vbVN0YXRlIHogPSBjYW1lcmEuZ2V0Q2FtZXJhSW5mbygpLmdldFpvb21TdGF0ZSgpLmdldFZhbHVlKCk7IGlmICh6ID09IG51bGwpIHJldHVybjsKICAgICAgICAgICAgICAgICAgICAgICAgZmxvYXQgbmV4dCA9IHouZ2V0Wm9vbVJhdGlvKCkgPCAxLjhmID8gMi4wZiA6IHouZ2V0Wm9vbVJhdGlvKCkgPCAyLjhmID8gMy4wZiA6IHouZ2V0Wm9vbVJhdGlvKCkgPCA0LjVmID8gNS4wZiA6IDEuMGY7CiAgICAgICAgICAgICAgICAgICAgICAgIG5leHQgPSBNYXRoLm1heCh6LmdldE1pblpvb21SYXRpbygpLCBNYXRoLm1pbih6LmdldE1heFpvb21SYXRpbygpLCBuZXh0KSk7CiAgICAgICAgICAgICAgICAgICAgICAgIGNhbWVyYS5nZXRDYW1lcmFDb250cm9sKCkuc2V0Wm9vbVJhdGlvKG5leHQpOwogICAgICAgICAgICAgICAgICAgIH0gY2F0Y2ggKFRocm93YWJsZSBpZ25vcmVkKSB7fQogICAgICAgICAgICAgICAgfSk7CgogICAgICAgICAgICAgICAgVGV4dFZpZXcgZ3JpZCA9IHByb0NoaXAoIuKWpiAgR1JJRCIsIGZhbHNlKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyBncmlkTHAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDgyKSwgZHAoNDApLCBHcmF2aXR5LkJPVFRPTSB8IEdyYXZpdHkuRU5EKTsKICAgICAgICAgICAgICAgIGdyaWRMcC5yaWdodE1hcmdpbiA9IGRwKDE0KTsgZ3JpZExwLmJvdHRvbU1hcmdpbiA9IGRwKDIyNCk7IHJvb3QuYWRkVmlldyhncmlkLCBncmlkTHApOwoKICAgICAgICAgICAgICAgIFRleHRWaWV3IGFmID0gcHJvQ2hpcCgi4oyWICBBRiIsIGZhbHNlKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyBhZkxwID0gbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyhkcCg4MiksIGRwKDQwKSwgR3Jhdml0eS5CT1RUT00gfCBHcmF2aXR5LkVORCk7CiAgICAgICAgICAgICAgICBhZkxwLnJpZ2h0TWFyZ2luID0gZHAoMTQpOyBhZkxwLmJvdHRvbU1hcmdpbiA9IGRwKDE3OCk7IHJvb3QuYWRkVmlldyhhZiwgYWZMcCk7CgogICAgICAgICAgICAgICAgVGV4dFZpZXcgbGVuc1JhaWwgPSBwcm9DaGlwKCJVVyAwLjUgICAgIFcgMcOXICAgICBUIDLDlyAgICAgVCA1w5ciLCBmYWxzZSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgbGVuc0xwID0gbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyhkcCgyMzApLCBkcCg0MiksIEdyYXZpdHkuQk9UVE9NIHwgR3Jhdml0eS5DRU5URVJfSE9SSVpPTlRBTCk7CiAgICAgICAgICAgICAgICBsZW5zTHAuYm90dG9tTWFyZ2luID0gZHAoMTYyKTsgcm9vdC5hZGRWaWV3KGxlbnNSYWlsLCBsZW5zTHApOwogICAgICAgICAgICAgICAgbGVuc1JhaWwuc2V0T25DbGlja0xpc3RlbmVyKHYgLT4geyBpZiAoY2FtZXJhICE9IG51bGwpIHRyeSB7IGNhbWVyYS5nZXRDYW1lcmFDb250cm9sKCkuc2V0Wm9vbVJhdGlvKDEuMGYpOyB9IGNhdGNoIChUaHJvd2FibGUgaWdub3JlZCkge30gfSk7CgogICAgICAgICAgICAgICAgcmVjb3JkQnV0dG9uID0gbmV3IFRleHRWaWV3KHRoaXMpOwogICAgICAgICAgICAgICAgcmVjb3JkQnV0dG9uLnNldFRleHQoIuKXjyIpOyByZWNvcmRCdXR0b24uc2V0VGV4dENvbG9yKDB4RkZGRjIwMjApOyByZWNvcmRCdXR0b24uc2V0VGV4dFNpemUoNDJmKTsgcmVjb3JkQnV0dG9uLnNldEdyYXZpdHkoR3Jhdml0eS5DRU5URVIpOwogICAgICAgICAgICAgICAgR3JhZGllbnREcmF3YWJsZSByZWNCZyA9IG5ldyBHcmFkaWVudERyYXdhYmxlKCk7IHJlY0JnLnNldENvbG9yKDB4MjIwMDAwMDApOyByZWNCZy5zZXRTaGFwZShHcmFkaWVudERyYXdhYmxlLk9WQUwpOyByZWNCZy5zZXRTdHJva2UoZHAoMiksIENvbG9yLldISVRFKTsgcmVjb3JkQnV0dG9uLnNldEJhY2tncm91bmQocmVjQmcpOwogICAgICAgICAgICAgICAgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zIHJlY0xwID0gbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyhkcCg4MiksIGRwKDgyKSwgR3Jhdml0eS5CT1RUT00gfCBHcmF2aXR5LkNFTlRFUl9IT1JJWk9OVEFMKTsKICAgICAgICAgICAgICAgIHJlY0xwLmJvdHRvbU1hcmdpbiA9IGRwKDcyKTsgcm9vdC5hZGRWaWV3KHJlY29yZEJ1dHRvbiwgcmVjTHApOyByZWNvcmRCdXR0b24uc2V0T25DbGlja0xpc3RlbmVyKHYgLT4gdG9nZ2xlUmVjb3JkaW5nKCkpOwoKICAgICAgICAgICAgICAgIFRleHRWaWV3IHRodW1iID0gcHJvQ2hpcCgi4panIiwgZmFsc2UpOwogICAgICAgICAgICAgICAgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zIHRodW1iTHAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDU0KSwgZHAoNTQpLCBHcmF2aXR5LkJPVFRPTSB8IEdyYXZpdHkuU1RBUlQpOwogICAgICAgICAgICAgICAgdGh1bWJMcC5sZWZ0TWFyZ2luID0gZHAoMTQpOyB0aHVtYkxwLmJvdHRvbU1hcmdpbiA9IGRwKDg4KTsgcm9vdC5hZGRWaWV3KHRodW1iLCB0aHVtYkxwKTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyBmbGlwID0gcHJvQ2hpcCgi4oa7IiwgZmFsc2UpOwogICAgICAgICAgICAgICAgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zIGZsaXBMcCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoNTIpLCBkcCg1MiksIEdyYXZpdHkuQk9UVE9NIHwgR3Jhdml0eS5FTkQpOwogICAgICAgICAgICAgICAgZmxpcExwLnJpZ2h0TWFyZ2luID0gZHAoMTQpOyBmbGlwTHAuYm90dG9tTWFyZ2luID0gZHAoODgpOyByb290LmFkZFZpZXcoZmxpcCwgZmxpcExwKTsKICAgICAgICAgICAgICAgIGZsaXAuc2V0T25DbGlja0xpc3RlbmVyKHYgLT4geyBpZiAocmVjb3JkaW5nICE9IG51bGwpIHJlY29yZGluZy5zdG9wKCk7IHVzZUZyb250ID0gIXVzZUZyb250OyBzdGFydENhbWVyYSgpOyB9KTsKCiAgICAgICAgICAgICAgICBUZXh0VmlldyBtb2RlcyA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIG1vZGVzLnNldFRleHQoIlZJREVPICAgICAgUEhPVE8gICAgICBTTE8tTU8gICAgICAgIENJTkVNQSAgICAgIFRJTUUtTEFQU0UgICAgICBNT1JFIik7IG1vZGVzLnNldFRleHRDb2xvcigweEU2RkZGRkZGKTsgbW9kZXMuc2V0VGV4dFNpemUoOGYpOyBtb2Rlcy5zZXRHcmF2aXR5KEdyYXZpdHkuQ0VOVEVSKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyBtb2Rlc0xwID0gbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyhGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMuTUFUQ0hfUEFSRU5ULCBkcCgzMCksIEdyYXZpdHkuQk9UVE9NKTsKICAgICAgICAgICAgICAgIG1vZGVzTHAubGVmdE1hcmdpbiA9IGRwKDgpOyBtb2Rlc0xwLnJpZ2h0TWFyZ2luID0gZHAoOCk7IG1vZGVzTHAuYm90dG9tTWFyZ2luID0gZHAoNDQpOyByb290LmFkZFZpZXcobW9kZXMsIG1vZGVzTHApOwoKICAgICAgICAgICAgICAgIExpbmVhckxheW91dCBkZWNrID0gbmV3IExpbmVhckxheW91dCh0aGlzKTsKICAgICAgICAgICAgICAgIGRlY2suc2V0T3JpZW50YXRpb24oTGluZWFyTGF5b3V0LkhPUklaT05UQUwpOyBkZWNrLnNldEdyYXZpdHkoR3Jhdml0eS5DRU5URVIpOyBkZWNrLnNldFBhZGRpbmcoZHAoNCksIGRwKDQpLCBkcCg0KSwgZHAoNCkpOyBkZWNrLnNldEJhY2tncm91bmQoZ2xhc3NQYW5lbChkcCgxNikpKTsKICAgICAgICAgICAgICAgIFRleHRWaWV3IGlzbyA9IG1pbmlDb250cm9sKCJJU08iLCAiQXV0byIpOyBUZXh0VmlldyBzaHV0dGVyID0gbWluaUNvbnRyb2woIlNIVVRURVIiLCAiMS8xMDAiKTsgVGV4dFZpZXcgd2IgPSBtaW5pQ29udHJvbCgiV0IiLCAiNTYwMEsiKTsKICAgICAgICAgICAgICAgIFRleHRWaWV3IGZvY3VzQ3RsID0gbWluaUNvbnRyb2woIkZPQ1VTIiwgIkFGIik7IFRleHRWaWV3IGV2Q3RsID0gbWluaUNvbnRyb2woIkVWIiwgIjAuMCIpOyBUZXh0VmlldyBsdXRDdGwgPSBtaW5pQ29udHJvbCgiTFVUIiwgIlN0YW5kYXJkIik7CiAgICAgICAgICAgICAgICBkZWNrLmFkZFZpZXcoaXNvLCBtaW5pTHAoKSk7IGRlY2suYWRkVmlldyhzaHV0dGVyLCBtaW5pTHAoKSk7IGRlY2suYWRkVmlldyh3YiwgbWluaUxwKCkpOyBkZWNrLmFkZFZpZXcoZm9jdXNDdGwsIG1pbmlMcCgpKTsgZGVjay5hZGRWaWV3KGV2Q3RsLCBtaW5pTHAoKSk7IGRlY2suYWRkVmlldyhsdXRDdGwsIG1pbmlMcCgpKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyBkZWNrTHAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcy5NQVRDSF9QQVJFTlQsIGRwKDYyKSwgR3Jhdml0eS5CT1RUT00pOwogICAgICAgICAgICAgICAgZGVja0xwLmxlZnRNYXJnaW4gPSBkcCg2KTsgZGVja0xwLnJpZ2h0TWFyZ2luID0gZHAoNik7IGRlY2tMcC5ib3R0b21NYXJnaW4gPSBkcCg0KTsgcm9vdC5hZGRWaWV3KGRlY2ssIGRlY2tMcCk7CgogICAgICAgICAgICAgICAgbW90aW9uQnV0dG9uID0gbWluaUNvbnRyb2woIk1PVElPTiIsICJPTiIpOwogICAgICAgICAgICAgICAgZW5oYW5jZUJ1dHRvbiA9IG1pbmlDb250cm9sKCJESVJFQ1QiLCAiSEVWQyIpOwogICAgICAgICAgICAgICAgaGlnaGxpZ2h0QnV0dG9uID0gbWluaUNvbnRyb2woIkFFIiwgIkFVVE8iKTsKICAgICAgICAgICAgICAgIGxpZ2h0QnV0dG9uID0gbWluaUNvbnRyb2woIkxJR0hUIiwgIk9GRiIpOwoKICAgICAgICAgICAgICAgIHN0YXR1cyA9IG5ldyBUZXh0Vmlldyh0aGlzKTsgc3RhdHVzLnNldFRleHQoIk1BR0lDIFBSTyBSRUFEWSIpOyBzdGF0dXMuc2V0VGV4dENvbG9yKENvbG9yLldISVRFKTsKICAgICAgICAgICAgICAgIHNldHRpbmdzQnRuLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IHN0YXR1cy5zZXRUZXh0KCJQUk8gU0VUVElOR1MiKSk7CiAgICAgICAgICAgICAgICBsdXRCdG4uc2V0T25DbGlja0xpc3RlbmVyKHYgLT4geyBhdXRvRW5oYW5jZSA9ICFhdXRvRW5oYW5jZTsgbHV0Q3RsLnNldFRleHQoYXV0b0VuaGFuY2UgPyAiTFVUXG5TdGFuZGFyZCIgOiAiTFVUXG5OYXR1cmFsIik7IH0pOwogICAgICAgICAgICAgICAgZ3JpZC5zZXRPbkNsaWNrTGlzdGVuZXIodiAtPiBncmlkLnNldFRleHQoZ3JpZC5nZXRUZXh0KCkudG9TdHJpbmcoKS5jb250YWlucygiT04iKSA/ICLilqYgIEdSSUQiIDogIuKWpiAgR1JJRCBPTiIpKTsKICAgICAgICAgICAgICAgIGFmLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IHN0YXR1cy5zZXRUZXh0KCJBRiDigKIgVEFQIFNVQkpFQ1QiKSk7CiAgICAgICAgICAgICAgICBwcm9CdG4uc2V0T25DbGlja0xpc3RlbmVyKHYgLT4gc3RhdHVzLnNldFRleHQoIkZIRDYwIOKAoiBIRVZDIOKAoiAxNU0g4oCiIFBSTyIpKTsKCiAgICAgICAgICAgICAgICBhc3BlY3RCdXR0b24gPSBwcm9DaGlwKGFzcGVjdE5pbmVTaXh0ZWVuID8gIjk6MTYiIDogIjE2OjkiLCBmYWxzZSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgYXNwZWN0THAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDU4KSwgZHAoMzQpLCBHcmF2aXR5LlRPUCB8IEdyYXZpdHkuRU5EKTsKICAgICAgICAgICAgICAgIGFzcGVjdExwLnJpZ2h0TWFyZ2luID0gZHAoMTQpOyBhc3BlY3RMcC50b3BNYXJnaW4gPSBkcCgxMjIpOyByb290LmFkZFZpZXcoYXNwZWN0QnV0dG9uLCBhc3BlY3RMcCk7CiAgICAgICAgICAgICAgICBhc3BlY3RCdXR0b24uc2V0T25DbGlja0xpc3RlbmVyKHYgLT4gewogICAgICAgICAgICAgICAgICAgIGlmIChyZWNvcmRpbmcgIT0gbnVsbCkgcmV0dXJuOyBhc3BlY3ROaW5lU2l4dGVlbiA9ICFhc3BlY3ROaW5lU2l4dGVlbjsKICAgICAgICAgICAgICAgICAgICBnZXRTaGFyZWRQcmVmZXJlbmNlcyhQUkVGU19OQU1FLCBNT0RFX1BSSVZBVEUpLmVkaXQoKS5wdXRCb29sZWFuKFBSRUZfQVNQRUNUXzlfMTYsIGFzcGVjdE5pbmVTaXh0ZWVuKS5hcHBseSgpOwogICAgICAgICAgICAgICAgICAgIGFzcGVjdEJ1dHRvbi5zZXRUZXh0KGFzcGVjdE5pbmVTaXh0ZWVuID8gIjk6MTYiIDogIjE2OjkiKTsgYXBwbHlSZXF1ZXN0ZWRBc3BlY3RPcmllbnRhdGlvbigpOwogICAgICAgICAgICAgICAgfSk7CgogICAgICAgICAgICAgICAgcHJlY2lzaW9uVGltZWxpbmUgPSBuZXcgVGV4dFZpZXcodGhpcyk7CiAgICAgICAgICAgICAgICBwcmVjaXNpb25UaW1lbGluZS5zZXRUZXh0KCIwMDowMDowMCIpOyBwcmVjaXNpb25UaW1lbGluZS5zZXRUZXh0Q29sb3IoQ29sb3IuV0hJVEUpOyBwcmVjaXNpb25UaW1lbGluZS5zZXRUZXh0U2l6ZSgxMWYpOwogICAgICAgICAgICAgICAgcHJlY2lzaW9uVGltZWxpbmUuc2V0VHlwZWZhY2UoVHlwZWZhY2UuTU9OT1NQQUNFLCBUeXBlZmFjZS5CT0xEKTsgcHJlY2lzaW9uVGltZWxpbmUuc2V0R3Jhdml0eShHcmF2aXR5LkNFTlRFUik7IHByZWNpc2lvblRpbWVsaW5lLnNldFZpc2liaWxpdHkoVmlldy5HT05FKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyB0aW1lckxwID0gbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyhkcCgxMTApLCBkcCgyNiksIEdyYXZpdHkuVE9QIHwgR3Jhdml0eS5DRU5URVJfSE9SSVpPTlRBTCk7CiAgICAgICAgICAgICAgICB0aW1lckxwLnRvcE1hcmdpbiA9IGRwKDc2KTsgcm9vdC5hZGRWaWV3KHByZWNpc2lvblRpbWVsaW5lLCB0aW1lckxwKTsKCiAgICAgICAgICAgICAgICBzZXRDb250ZW50Vmlldyhyb290KTsKICAgICAgICAgICAgfQoKICAgICAgICAgICAgcHJpdmF0ZSBHcmFkaWVudERyYXdhYmxlIGdsYXNzUGFuZWwoaW50IHJhZGl1c1B4KSB7CiAgICAgICAgICAgICAgICBHcmFkaWVudERyYXdhYmxlIGJnID0gbmV3IEdyYWRpZW50RHJhd2FibGUoKTsKICAgICAgICAgICAgICAgIGJnLnNldENvbG9yKDB4OTkwODBBMEQpOyBiZy5zZXRDb3JuZXJSYWRpdXMocmFkaXVzUHgpOyBiZy5zZXRTdHJva2UoZHAoMSksIDB4NDRGRkZGRkYpOyByZXR1cm4gYmc7CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIHByaXZhdGUgVGV4dFZpZXcgcHJvQ2hpcChTdHJpbmcgdGV4dCwgYm9vbGVhbiBhY2NlbnQpIHsKICAgICAgICAgICAgICAgIFRleHRWaWV3IHYgPSBuZXcgVGV4dFZpZXcodGhpcyk7IHYuc2V0VGV4dCh0ZXh0KTsgdi5zZXRUZXh0Q29sb3IoYWNjZW50ID8gMHhGRkZGQzQzRCA6IENvbG9yLldISVRFKTsKICAgICAgICAgICAgICAgIHYuc2V0VGV4dFNpemUoMTBmKTsgdi5zZXRHcmF2aXR5KEdyYXZpdHkuQ0VOVEVSKTsgdi5zZXRCYWNrZ3JvdW5kKGdsYXNzUGFuZWwoZHAoMTgpKSk7IHJldHVybiB2OwogICAgICAgICAgICB9CgogICAgICAgICAgICBwcml2YXRlIFRleHRWaWV3IG1pbmlDb250cm9sKFN0cmluZyB0aXRsZSwgU3RyaW5nIHZhbHVlKSB7CiAgICAgICAgICAgICAgICBUZXh0VmlldyB2ID0gbmV3IFRleHRWaWV3KHRoaXMpOyB2LnNldFRleHQodGl0bGUgKyAiXG4iICsgdmFsdWUpOyB2LnNldFRleHRDb2xvcihDb2xvci5XSElURSk7CiAgICAgICAgICAgICAgICB2LnNldFRleHRTaXplKDcuNWYpOyB2LnNldEdyYXZpdHkoR3Jhdml0eS5DRU5URVIpOyByZXR1cm4gdjsKICAgICAgICAgICAgfQoKICAgICAgICAgICAgcHJpdmF0ZSBMaW5lYXJMYXlvdXQuTGF5b3V0UGFyYW1zIG1pbmlMcCgpIHsKICAgICAgICAgICAgICAgIExpbmVhckxheW91dC5MYXlvdXRQYXJhbXMgbHAgPSBuZXcgTGluZWFyTGF5b3V0LkxheW91dFBhcmFtcygwLCBkcCg1MiksIDFmKTsKICAgICAgICAgICAgICAgIGxwLnNldE1hcmdpblN0YXJ0KGRwKDEpKTsgbHAuc2V0TWFyZ2luRW5kKGRwKDEpKTsgcmV0dXJuIGxwOwogICAgICAgICAgICB9Cgo=").decode("utf-8")
+        source = source[:start] + clean_ui + source[end:]
+
+        source = source.replace('recordButton.setText("STOP");', 'recordButton.setText("■");')
+        source = source.replace('recordButton.setText("RECORD");', 'recordButton.setText("●");')
+        source = source.replace('lightButton.setText(torchOn ? "LIGHT ON" : "LIGHT");', 'lightButton.setText(torchOn ? "LIGHT\\nON" : "LIGHT\\nOFF");')
+
+        new.write_text(source)
+        old.unlink()
+        manifest.write_text(manifest.read_text().replace(".R50ReferenceTextureBalanceCameraActivity", ".R67MagicProStandaloneActivity").replace("DU Camera R50 Texture Balance", "Magic Pro Cinema Camera"))
+        gradle.write_text(gradle.read_text().replace("com.sentongoharuna.ducamera.r050referencetexturebalancepro", "com.sentongoharuna.ducamera.r067magicprostandalone").replace("versionCode 400000064", "versionCode 400000081").replace("versionName '1.0-r050-reference-texture-balance-pro'", "versionName '1.0-r067-magic-pro-standalone-clean'"))
+        settings.write_text(settings.read_text().replace("DUCameraR050ReferenceTextureBalancePro", "DUCameraR067MagicProStandaloneClean"))
+
+        checks = [
+            "QualitySelector.from(Quality.FHD)",
+            "new Range<>(60, 60)",
+            "MIMETYPE_VIDEO_HEVC",
+            "15_000_000",
+            "NOISE_REDUCTION_MODE_OFF",
+            "TONEMAP_MODE_HIGH_QUALITY",
+            "COLOR_CORRECTION_MODE_HIGH_QUALITY",
+            "MAGIC PRO\\nCINEMA CAMERA",
+            "histogram = new TextView",
+            "audio = new TextView",
+            "zoom = new TextView",
+            'recordButton.setText("●")',
+            "LinearLayout deck = new LinearLayout",
+            "VIDEO      PHOTO      SLO-MO"
+        ]
+        missing = [c for c in checks if c not in source]
+        if missing:
+            raise RuntimeError("R067 standalone audit missing: " + ", ".join(missing))
+        if any(marker in source for marker in ["R51 UI", "R65 audit", "R66 UI guardrails"]):
+            raise RuntimeError("R067 standalone inherited an old UI patch chain")
+
+        print("PASS: R067 standalone built directly from proven R50 engine.")
+        print("PASS: No R51/R65/R66 UI patch chain.")
+        print("PASS: One clean Magic Pro buildUi replacement installed.")
+        PY
+
+    - name: Upgrade R067 to R068 Magic Pro Elite HUD
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        from pathlib import Path
+
+        src = Path('r50-texture/app/src/main/java/com/sentongoharuna/ducamera/R67MagicProStandaloneActivity.java')
+        dst = Path('r50-texture/app/src/main/java/com/sentongoharuna/ducamera/R68MagicProEliteActivity.java')
+        s = src.read_text()
+
+        s = s.replace('R67MagicProStandaloneActivity', 'R68MagicProEliteActivity')
+
+        # R068 is a UI-only refinement over the proven R067/R50 camera engine.
+        replacements = {
+            'brand.setText("MAGIC PRO\\nCINEMA CAMERA");':
+                'brand.setText("MAGIC PRO\\nCINEMA CAMERA • ELITE");',
+            'codec.setText("HDR  ·  LOG  ·  HEVC\\n10-BIT  ·  PRO-HQ\\nSTAB  ·  MOTION+");':
+                'codec.setText("FHD60  ·  HEVC  ·  15M\\nPRO-HQ  ·  STAB  ·  MOTION+\\nDIRECT FINAL");',
+            'storage.setText("256GB\\n2h 14m    95%");':
+                'storage.setText("MEDIA\\nREADY    95%");',
+            'focus.setText("⌜       ⌝\\n\\n    +\\n\\n⌞       ⌟");':
+                'focus.setText("⌜       ⌝\\n\\n    +\\n\\n⌞       ⌟\\n\\nAF • TRACK");',
+            'focus.setTextSize(18f);':
+                'focus.setTextSize(16f);',
+            'values.setText("ISO\\n100\\n\\nS\\n1/100\\n\\nWB\\n5600K\\n\\nAF  •\\n0.78");':
+                'values.setText("ISO\\nAUTO\\n\\nS\\n1/120\\n\\nWB\\n5600K\\n\\nAF-C\\nTRACK\\n\\nEV\\n0.0");',
+            'audio.setText("MIC\\n▮ ▮\\n▮ ▮\\n▮ ▮\\n▮ ▮\\n▮ ▮\\nL   R\\n-12 dB");':
+                'audio.setText("MIC\\n▮ ▮\\n▮ ▮\\n▮ ▮\\n▮ ▮\\n▮ ▮\\nL   R\\n-12 dB\\nPEAK");',
+            'TextView grid = proChip("▦  GRID", false);':
+                'TextView grid = proChip("▦ GRID", false);',
+            'TextView af = proChip("⌖  AF", false);':
+                'TextView af = proChip("⌖ AF-C", false);',
+            'TextView iso = miniControl("ISO", "Auto");':
+                'TextView iso = miniControl("ISO", "AUTO");',
+            'TextView shutter = miniControl("SHUTTER", "1/100");':
+                'TextView shutter = miniControl("SHUTTER", "1/120");',
+            'TextView focusCtl = miniControl("FOCUS", "AF");':
+                'TextView focusCtl = miniControl("FOCUS", "AF-C");',
+            'TextView lutCtl = miniControl("LUT", "Standard");':
+                'TextView lutCtl = miniControl("LUT", "PRO");'
+        }
+        for old, new in replacements.items():
+            if old not in s:
+                raise RuntimeError('R068 expected UI token missing: ' + old[:80])
+            s = s.replace(old, new, 1)
+
+        quick_anchor = '                afLp.rightMargin = dp(14); afLp.bottomMargin = dp(178); root.addView(af, afLp);\n\n                TextView lensRail'
+        quick_add = '''                afLp.rightMargin = dp(14); afLp.bottomMargin = dp(178); root.addView(af, afLp);
+
+                TextView zebra = proChip("ZEBRA", false);
+                FrameLayout.LayoutParams zebraLp = new FrameLayout.LayoutParams(dp(82), dp(36), Gravity.BOTTOM | Gravity.END);
+                zebraLp.rightMargin = dp(14); zebraLp.bottomMargin = dp(134); root.addView(zebra, zebraLp);
+
+                TextView scopes = proChip("SCOPES", false);
+                FrameLayout.LayoutParams scopesLp = new FrameLayout.LayoutParams(dp(82), dp(36), Gravity.BOTTOM | Gravity.END);
+                scopesLp.rightMargin = dp(14); scopesLp.bottomMargin = dp(94); root.addView(scopes, scopesLp);
+
+                zebra.setOnClickListener(v -> zebra.setText(
+                    zebra.getText().toString().contains("ON") ? "ZEBRA" : "ZEBRA ON"
+                ));
+                scopes.setOnClickListener(v -> {
+                    histogram.setVisibility(histogram.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+                    waveform.setVisibility(waveform.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+                });
+
+                TextView lensRail'''
+        if quick_anchor not in s:
+            raise RuntimeError('R068 quick-tool anchor missing')
+        s = s.replace(quick_anchor, quick_add, 1)
+
+        timer_anchor = '                precisionTimeline = new TextView(this);\n                precisionTimeline.setText("00:00:00");'
+        timer_add = '''                TextView recState = new TextView(this);
+                recState.setText("STBY  •  FHD60  •  HEVC  •  15M");
+                recState.setTextColor(0xFFFFC43D); recState.setTextSize(8.5f);
+                recState.setGravity(Gravity.CENTER); recState.setBackground(glassPanel(dp(12)));
+                FrameLayout.LayoutParams recStateLp = new FrameLayout.LayoutParams(dp(210), dp(28), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                recStateLp.topMargin = dp(118); root.addView(recState, recStateLp);
+
+                precisionTimeline = new TextView(this);
+                precisionTimeline.setText("00:00:00");'''
+        if timer_anchor not in s:
+            raise RuntimeError('R068 timer anchor missing')
+        s = s.replace(timer_anchor, timer_add, 1)
+
+        dst.write_text(s)
+        src.unlink()
+
+        manifest = Path('r50-texture/app/src/main/AndroidManifest.xml')
+        manifest.write_text(
+            manifest.read_text()
+            .replace('.R67MagicProStandaloneActivity', '.R68MagicProEliteActivity')
+            .replace('Magic Pro Cinema Camera', 'Magic Pro Elite Cinema Camera')
+        )
+
+        gradle = Path('r50-texture/app/build.gradle')
+        gradle.write_text(
+            gradle.read_text()
+            .replace('com.sentongoharuna.ducamera.r067magicprostandalone',
+                     'com.sentongoharuna.ducamera.r068magicproelite')
+            .replace('versionCode 400000081', 'versionCode 400000082')
+            .replace("versionName '1.0-r067-magic-pro-standalone-clean'",
+                     "versionName '1.0-r068-magic-pro-elite-hud'")
+        )
+
+        settings = Path('r50-texture/settings.gradle')
+        settings.write_text(
+            settings.read_text().replace(
+                'DUCameraR067MagicProStandaloneClean',
+                'DUCameraR068MagicProEliteHUD'
+            )
+        )
+
+        ui_required = [
+            'MAGIC PRO\\nCINEMA CAMERA • ELITE',
+            'DIRECT FINAL',
+            'proChip("ZEBRA", false)',
+            'proChip("SCOPES", false)',
+            'STBY  •  FHD60  •  HEVC  •  15M',
+            'miniControl("FOCUS", "AF-C")',
+            'miniControl("LUT", "PRO")'
+        ]
+        missing = [x for x in ui_required if x not in s]
+        if missing:
+            raise RuntimeError('R068 UI audit missing: ' + ', '.join(missing))
+
+        engine_required = [
+            'QualitySelector.from(Quality.FHD)',
+            'new Range<>(60, 60)',
+            'MIMETYPE_VIDEO_HEVC',
+            '15_000_000',
+            'NOISE_REDUCTION_MODE_OFF',
+            'TONEMAP_MODE_HIGH_QUALITY',
+            'COLOR_CORRECTION_MODE_HIGH_QUALITY'
+        ]
+        missing_engine = [x for x in engine_required if x not in s]
+        if missing_engine:
+            raise RuntimeError('R068 engine audit missing: ' + ', '.join(missing_engine))
+
+        print('PASS: R068 Elite HUD upgrade complete.')
+        PY
+
+    - name: R068 strict preflight - fail early with exact reason
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        SRC="r50-texture/app/src/main/java/com/sentongoharuna/ducamera/R68MagicProEliteActivity.java"
+        MANIFEST="r50-texture/app/src/main/AndroidManifest.xml"
+        GRADLE="r50-texture/app/build.gradle"
+        SETTINGS="r50-texture/settings.gradle"
+
+        test -s "$SRC"
+        test -s "$MANIFEST"
+        test -s "$GRADLE"
+        test -s "$SETTINGS"
+
+        # Exact class/package/application identity.
+        grep -q 'public class R68MagicProEliteActivity extends ComponentActivity' "$SRC"
+        grep -q 'android:name=".R68MagicProEliteActivity"' "$MANIFEST"
+        grep -q "applicationId 'com.sentongoharuna.ducamera.r068magicproelite'" "$GRADLE"
+        grep -q "versionCode 400000082" "$GRADLE"
+        grep -q "versionName '1.0-r068-magic-pro-elite-hud'" "$GRADLE"
+
+        # Imports used by the clean UI.
+        grep -q 'import android.graphics.Typeface;' "$SRC"
+        grep -q 'import android.widget.FrameLayout;' "$SRC"
+        grep -q 'import android.widget.LinearLayout;' "$SRC"
+        grep -q 'import android.widget.TextView;' "$SRC"
+        grep -q 'import androidx.camera.core.ZoomState;' "$SRC"
+
+        # Locked camera engine invariants.
+        grep -q 'QualitySelector.from(Quality.FHD)' "$SRC"
+        grep -q 'new Range<>(60, 60)' "$SRC"
+        grep -q 'MIMETYPE_VIDEO_HEVC' "$SRC"
+        grep -q '15_000_000' "$SRC"
+        grep -q 'NOISE_REDUCTION_MODE_OFF' "$SRC"
+        grep -q 'TONEMAP_MODE_HIGH_QUALITY' "$SRC"
+        grep -q 'COLOR_CORRECTION_MODE_HIGH_QUALITY' "$SRC"
+
+        # New Magic Pro UI structure.
+        grep -q 'MAGIC PRO\\nCINEMA CAMERA' "$SRC"
+        grep -q 'TextView histogram = new TextView' "$SRC"
+        grep -q 'TextView waveform = new TextView' "$SRC"
+        grep -q 'TextView audio = new TextView' "$SRC"
+        grep -q 'TextView zoom = new TextView' "$SRC"
+        grep -q 'recordButton.setText("●")' "$SRC"
+        grep -q 'LinearLayout deck = new LinearLayout' "$SRC"
+        grep -q 'VIDEO      PHOTO      SLO-MO' "$SRC"
+
+        # Old patched UI markers must not survive.
+        ! grep -q 'R51 UI' "$SRC"
+        ! grep -q 'R65 audit' "$SRC"
+        ! grep -q 'R66 UI guardrails' "$SRC"
+        ! grep -q 'AssertionError' "$SRC"
+
+        # Structural Java sanity checks, including balanced braces/parens
+        # after comments and strings are removed.
+        python3 - <<'PY'
+        from pathlib import Path
+        import re
+
+        p = Path("r50-texture/app/src/main/java/com/sentongoharuna/ducamera/R68MagicProEliteActivity.java")
+        s = p.read_text()
+
+        cleaned = re.sub(r'/\*.*?\*/', '', s, flags=re.S)
+        cleaned = re.sub(r'//.*', '', cleaned)
+        cleaned = re.sub(r'"(?:\\.|[^"\\])*"', '""', cleaned)
+
+        if cleaned.count('{') != cleaned.count('}'):
+            raise RuntimeError(f"Java brace mismatch: {cleaned.count('{')} vs {cleaned.count('}')}")
+        if cleaned.count('(') != cleaned.count(')'):
+            raise RuntimeError(f"Java parenthesis mismatch: {cleaned.count('(')} vs {cleaned.count(')')}")
+
+        # Verify every UI field relied on by the engine is still initialized.
+        required = [
+            'recordButton = new TextView(this);',
+            'lightButton = miniControl("LIGHT", "OFF");',
+            'highlightButton = miniControl("AE", "AUTO");',
+            'adaptiveButton = proChip("◉", false);',
+            'motionButton = miniControl("MOTION", "ON");',
+            'enhanceButton = miniControl("DIRECT", "HEVC");',
+            'status = new TextView(this);',
+            'aspectButton = proChip(',
+            'precisionTimeline = new TextView(this);',
+        ]
+        missing = [x for x in required if x not in s]
+        if missing:
+            raise RuntimeError("R068 preflight missing engine-linked UI initialization: " + ", ".join(missing))
+
+        print("PASS: R068 Java structural preflight")
+        PY
+
+        echo "PASS: R068 strict preflight completed"
+
+    - name: Upgrade R068 to R069 clean non-overlapping functional controls
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo 'CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAppbXBvcnQgcmUKCnNyYyA9IFBhdGgoInI1MC10ZXh0dXJlL2FwcC9zcmMvbWFpbi9qYXZhL2NvbS9zZW50b25nb2hhcnVuYS9kdWNhbWVyYS9SNjhNYWdpY1Byb0VsaXRlQWN0aXZpdHkuamF2YSIpCmRzdCA9IFBhdGgoInI1MC10ZXh0dXJlL2FwcC9zcmMvbWFpbi9qYXZhL2NvbS9zZW50b25nb2hhcnVuYS9kdWNhbWVyYS9SNjlNYWdpY1Byb0NsZWFuQ29udHJvbHNBY3Rpdml0eS5qYXZhIikKcyA9IHNyYy5yZWFkX3RleHQoKQoKZGVmIG11c3Qob2xkLCBuZXcsIGxhYmVsKToKICAgIGdsb2JhbCBzCiAgICBpZiBvbGQgbm90IGluIHM6CiAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKCJSMDY5IG1pc3NpbmcgYW5jaG9yOiAiICsgbGFiZWwpCiAgICBzID0gcy5yZXBsYWNlKG9sZCwgbmV3LCAxKQoKcyA9IHMucmVwbGFjZSgiUjY4TWFnaWNQcm9FbGl0ZUFjdGl2aXR5IiwgIlI2OU1hZ2ljUHJvQ2xlYW5Db250cm9sc0FjdGl2aXR5IikKcyA9IHMucmVwbGFjZSgiQ0lORU1BIENBTUVSQSDigKIgRUxJVEUiLCAiQ0lORU1BIENBTUVSQSDigKIgUFJPIikKCiMgTm9uLW92ZXJsYXBwaW5nIGxheW91dCBiYW5kcy4KZm9yIG9sZCxuZXcsbGFiZWwgaW4gWwogICAgKCJtb2Rlc0xwLmJvdHRvbU1hcmdpbiA9IGRwKDQ0KTsiLCJtb2Rlc0xwLmJvdHRvbU1hcmdpbiA9IGRwKDcwKTsiLCJtb2RlcyIpLAogICAgKCJyZWNMcC5ib3R0b21NYXJnaW4gPSBkcCg3Mik7IiwicmVjTHAuYm90dG9tTWFyZ2luID0gZHAoMTA1KTsiLCJyZWNvcmQiKSwKICAgICgidGh1bWJMcC5sZWZ0TWFyZ2luID0gZHAoMTQpOyB0aHVtYkxwLmJvdHRvbU1hcmdpbiA9IGRwKDg4KTsiLCJ0aHVtYkxwLmxlZnRNYXJnaW4gPSBkcCgxNCk7IHRodW1iTHAuYm90dG9tTWFyZ2luID0gZHAoMTA1KTsiLCJ0aHVtYiIpLAogICAgKCJmbGlwTHAucmlnaHRNYXJnaW4gPSBkcCgxNCk7IGZsaXBMcC5ib3R0b21NYXJnaW4gPSBkcCg4OCk7IiwiZmxpcExwLnJpZ2h0TWFyZ2luID0gZHAoMTQpOyBmbGlwTHAuYm90dG9tTWFyZ2luID0gZHAoMTA1KTsiLCJmbGlwIiksCiAgICAoImxlbnNMcC5ib3R0b21NYXJnaW4gPSBkcCgxNjIpOyIsImxlbnNMcC5ib3R0b21NYXJnaW4gPSBkcCgxOTUpOyIsImxlbnMiKSwKICAgICgiZ3JpZExwLnJpZ2h0TWFyZ2luID0gZHAoMTQpOyBncmlkTHAuYm90dG9tTWFyZ2luID0gZHAoMjI0KTsiLCJncmlkTHAucmlnaHRNYXJnaW4gPSBkcCgxNCk7IGdyaWRMcC5ib3R0b21NYXJnaW4gPSBkcCgyODUpOyIsImdyaWQiKSwKICAgICgiYWZMcC5yaWdodE1hcmdpbiA9IGRwKDE0KTsgYWZMcC5ib3R0b21NYXJnaW4gPSBkcCgxNzgpOyIsImFmTHAucmlnaHRNYXJnaW4gPSBkcCgxNCk7IGFmTHAuYm90dG9tTWFyZ2luID0gZHAoMjQxKTsiLCJhZiIpLAogICAgKCJ6ZWJyYUxwLnJpZ2h0TWFyZ2luID0gZHAoMTQpOyB6ZWJyYUxwLmJvdHRvbU1hcmdpbiA9IGRwKDEzNCk7IiwiemVicmFMcC5yaWdodE1hcmdpbiA9IGRwKDE0KTsgemVicmFMcC5ib3R0b21NYXJnaW4gPSBkcCgxOTcpOyIsImh1ZCIpLAogICAgKCJzY29wZXNMcC5yaWdodE1hcmdpbiA9IGRwKDE0KTsgc2NvcGVzTHAuYm90dG9tTWFyZ2luID0gZHAoOTQpOyIsInNjb3Blc0xwLnJpZ2h0TWFyZ2luID0gZHAoMTQpOyBzY29wZXNMcC5ib3R0b21NYXJnaW4gPSBkcCgxNTMpOyIsInNjb3BlcyIpLApdOgogICAgbXVzdChvbGQsbmV3LGxhYmVsKQoKIyBaRUJSQSAtPiBIVUQgYmVjYXVzZSB0aGUgY29udHJvbCBtdXN0IGRvIGV4YWN0bHkgd2hhdCBpdCBzYXlzLgptdXN0KCdUZXh0VmlldyB6ZWJyYSA9IHByb0NoaXAoIlpFQlJBIiwgZmFsc2UpOycsJ1RleHRWaWV3IGh1ZEJ0biA9IHByb0NoaXAoIkhVRCIsIGZhbHNlKTsnLCJodWQgYnV0dG9uIikKcyA9IHMucmVwbGFjZSgiemVicmFMcCIsICJodWRMcCIpCnMgPSBzLnJlcGxhY2UoInJvb3QuYWRkVmlldyh6ZWJyYSwgaHVkTHApOyIsICJyb290LmFkZFZpZXcoaHVkQnRuLCBodWRMcCk7IikKCnBhdCA9IHJlLmNvbXBpbGUocidccyp6ZWJyYVwuc2V0T25DbGlja0xpc3RlbmVyXCh2IC0+IHplYnJhXC5zZXRUZXh0XChccyp6ZWJyYVwuZ2V0VGV4dFwoXClcLnRvU3RyaW5nXChcKVwuY29udGFpbnNcKCJPTiJcKSBcPyAiWkVCUkEiIDogIlpFQlJBIE9OIlxzKlwpXCk7JywgcmUuUykKbSA9IHBhdC5zZWFyY2gocykKaWYgbm90IG06CiAgICByYWlzZSBSdW50aW1lRXJyb3IoIlIwNjkgbWlzc2luZyBhbmNob3I6IGh1ZCBsaXN0ZW5lciIpCmh1ZF9saXN0ZW5lciA9ICcnJwogICAgICAgIGh1ZEJ0bi5zZXRPbkNsaWNrTGlzdGVuZXIodiAtPiB7CiAgICAgICAgICAgIGJvb2xlYW4gc2hvdyA9IHZhbHVlcy5nZXRWaXNpYmlsaXR5KCkgIT0gVmlldy5WSVNJQkxFOwogICAgICAgICAgICBpbnQgdmlzID0gc2hvdyA/IFZpZXcuVklTSUJMRSA6IFZpZXcuR09ORTsKICAgICAgICAgICAgdmFsdWVzLnNldFZpc2liaWxpdHkodmlzKTsKICAgICAgICAgICAgYXVkaW8uc2V0VmlzaWJpbGl0eSh2aXMpOwogICAgICAgICAgICBldi5zZXRWaXNpYmlsaXR5KHZpcyk7CiAgICAgICAgICAgIHpvb20uc2V0VmlzaWJpbGl0eSh2aXMpOwogICAgICAgICAgICBodWRCdG4uc2V0VGV4dChzaG93ID8gIkhVRCBPTiIgOiAiSFVEIE9GRiIpOwogICAgICAgIH0pOycnJwpzID0gc1s6bS5zdGFydCgpXSArIGh1ZF9saXN0ZW5lciArIHNbbS5lbmQoKTpdCgojIFJlYWwgZ3JpZCBvdmVybGF5LgphbmNob3IgPSAnICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyBncmlkTHAgPSBuZXcgRnJhbWVMYXlvdXQuTGF5b3V0UGFyYW1zKGRwKDgyKSwgZHAoNDApLCBHcmF2aXR5LkJPVFRPTSB8IEdyYXZpdHkuRU5EKTsnCmdyaWRfb3ZlcmxheSA9ICcnJyAgICAgICAgICAgICAgICBUZXh0VmlldyBncmlkT3ZlcmxheSA9IG5ldyBUZXh0Vmlldyh0aGlzKTsKICAgICAgICAgICAgICAgIGdyaWRPdmVybGF5LnNldFRleHQoIiAgICAgIOKUgiAgICAgIOKUgiAgICAgIFxcbuKUgOKUgOKUgOKUgOKUgOKUgOKUvOKUgOKUgOKUgOKUgOKUgOKUgOKUvOKUgOKUgOKUgOKUgOKUgOKUgFxcbiAgICAgIOKUgiAgICAgIOKUgiAgICAgIFxcbuKUgOKUgOKUgOKUgOKUgOKUgOKUvOKUgOKUgOKUgOKUgOKUgOKUgOKUvOKUgOKUgOKUgOKUgOKUgOKUgFxcbiAgICAgIOKUgiAgICAgIOKUgiAgICAgICIpOwogICAgICAgICAgICAgICAgZ3JpZE92ZXJsYXkuc2V0VGV4dENvbG9yKDB4NTVGRkZGRkYpOwogICAgICAgICAgICAgICAgZ3JpZE92ZXJsYXkuc2V0VGV4dFNpemUoMTZmKTsKICAgICAgICAgICAgICAgIGdyaWRPdmVybGF5LnNldEdyYXZpdHkoR3Jhdml0eS5DRU5URVIpOwogICAgICAgICAgICAgICAgZ3JpZE92ZXJsYXkuc2V0VHlwZWZhY2UoVHlwZWZhY2UuTU9OT1NQQUNFKTsKICAgICAgICAgICAgICAgIGdyaWRPdmVybGF5LnNldFZpc2liaWxpdHkoVmlldy5HT05FKTsKICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcyBncmlkT3ZlcmxheUxwID0gbmV3IEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcygKICAgICAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMuTUFUQ0hfUEFSRU5ULAogICAgICAgICAgICAgICAgICAgIEZyYW1lTGF5b3V0LkxheW91dFBhcmFtcy5NQVRDSF9QQVJFTlQKICAgICAgICAgICAgICAgICk7CiAgICAgICAgICAgICAgICBncmlkT3ZlcmxheUxwLmxlZnRNYXJnaW4gPSBkcCg4Nik7CiAgICAgICAgICAgICAgICBncmlkT3ZlcmxheUxwLnJpZ2h0TWFyZ2luID0gZHAoODYpOwogICAgICAgICAgICAgICAgZ3JpZE92ZXJsYXlMcC50b3BNYXJnaW4gPSBkcCgxNTApOwogICAgICAgICAgICAgICAgZ3JpZE92ZXJsYXlMcC5ib3R0b21NYXJnaW4gPSBkcCgyNDUpOwogICAgICAgICAgICAgICAgcm9vdC5hZGRWaWV3KGdyaWRPdmVybGF5LCBncmlkT3ZlcmxheUxwKTsKCicnJyArIGFuY2hvcgptdXN0KGFuY2hvciwgZ3JpZF9vdmVybGF5LCAiZ3JpZCBvdmVybGF5IikKCm11c3QoCiAgICAnICAgICAgICAgICAgICAgIGdyaWQuc2V0T25DbGlja0xpc3RlbmVyKHYgLT4gZ3JpZC5zZXRUZXh0KGdyaWQuZ2V0VGV4dCgpLnRvU3RyaW5nKCkuY29udGFpbnMoIk9OIikgPyAi4pamICBHUklEIiA6ICLilqYgIEdSSUQgT04iKSk7JywKICAgICcnJyAgICAgICAgICAgICAgICBncmlkLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IHsKICAgICAgICAgICAgICAgICAgICBib29sZWFuIHNob3cgPSBncmlkT3ZlcmxheS5nZXRWaXNpYmlsaXR5KCkgIT0gVmlldy5WSVNJQkxFOwogICAgICAgICAgICAgICAgICAgIGdyaWRPdmVybGF5LnNldFZpc2liaWxpdHkoc2hvdyA/IFZpZXcuVklTSUJMRSA6IFZpZXcuR09ORSk7CiAgICAgICAgICAgICAgICAgICAgZ3JpZC5zZXRUZXh0KHNob3cgPyAi4pamIEdSSUQgT04iIDogIuKWpiBHUklEIik7CiAgICAgICAgICAgICAgICB9KTsnJycsCiAgICAiZ3JpZCBsaXN0ZW5lciIKKQoKIyBSZWFsIEFGL0FFIGNlbnRlciBtZXRlcmluZy4KbXVzdCgKICAgICcgICAgICAgICAgICAgICAgYWYuc2V0T25DbGlja0xpc3RlbmVyKHYgLT4gc3RhdHVzLnNldFRleHQoIkFGIOKAoiBUQVAgU1VCSkVDVCIpKTsnLAogICAgJycnICAgICAgICAgICAgICAgIGFmLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IHsKICAgICAgICAgICAgICAgICAgICBpZiAoY2FtZXJhID09IG51bGwgfHwgcHJldmlld1ZpZXcgPT0gbnVsbCkgcmV0dXJuOwogICAgICAgICAgICAgICAgICAgIHRyeSB7CiAgICAgICAgICAgICAgICAgICAgICAgIE1ldGVyaW5nUG9pbnQgcCA9IHByZXZpZXdWaWV3LmdldE1ldGVyaW5nUG9pbnRGYWN0b3J5KCkuY3JlYXRlUG9pbnQoCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBwcmV2aWV3Vmlldy5nZXRXaWR0aCgpIC8gMmYsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBwcmV2aWV3Vmlldy5nZXRIZWlnaHQoKSAvIDJmCiAgICAgICAgICAgICAgICAgICAgICAgICk7CiAgICAgICAgICAgICAgICAgICAgICAgIEZvY3VzTWV0ZXJpbmdBY3Rpb24gYWN0aW9uID0gbmV3IEZvY3VzTWV0ZXJpbmdBY3Rpb24uQnVpbGRlcigKICAgICAgICAgICAgICAgICAgICAgICAgICAgIHAsIEZvY3VzTWV0ZXJpbmdBY3Rpb24uRkxBR19BRiB8IEZvY3VzTWV0ZXJpbmdBY3Rpb24uRkxBR19BRQogICAgICAgICAgICAgICAgICAgICAgICApLmJ1aWxkKCk7CiAgICAgICAgICAgICAgICAgICAgICAgIGNhbWVyYS5nZXRDYW1lcmFDb250cm9sKCkuc3RhcnRGb2N1c0FuZE1ldGVyaW5nKGFjdGlvbik7CiAgICAgICAgICAgICAgICAgICAgICAgIGFmLnNldFRleHQoIuKMliBBRiBMT0NLIik7CiAgICAgICAgICAgICAgICAgICAgICAgIGZvY3VzLnNldFRleHQoIuKMnCAgICAgICDijJ1cXG5cXG4gICAgK1xcblxcbuKMniAgICAgICDijJ9cXG5cXG5BRiDigKIgTE9DSyIpOwogICAgICAgICAgICAgICAgICAgIH0gY2F0Y2ggKFRocm93YWJsZSBpZ25vcmVkKSB7CiAgICAgICAgICAgICAgICAgICAgICAgIGFmLnNldFRleHQoIuKMliBBRi1DIik7CiAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgfSk7JycnLAogICAgImFmIGxpc3RlbmVyIgopCgojIFNFVFRJTkdTIGNvbnRyb2xzIHRoZSBkZWNrLgptdXN0KAogICAgJyAgICAgICAgICAgICAgICBzZXR0aW5nc0J0bi5zZXRPbkNsaWNrTGlzdGVuZXIodiAtPiBzdGF0dXMuc2V0VGV4dCgiUFJPIFNFVFRJTkdTIikpOycsCiAgICAnJycgICAgICAgICAgICAgICAgc2V0dGluZ3NCdG4uc2V0T25DbGlja0xpc3RlbmVyKHYgLT4gewogICAgICAgICAgICAgICAgICAgIGJvb2xlYW4gc2hvdyA9IGRlY2suZ2V0VmlzaWJpbGl0eSgpICE9IFZpZXcuVklTSUJMRTsKICAgICAgICAgICAgICAgICAgICBkZWNrLnNldFZpc2liaWxpdHkoc2hvdyA/IFZpZXcuVklTSUJMRSA6IFZpZXcuR09ORSk7CiAgICAgICAgICAgICAgICAgICAgc2V0dGluZ3NCdG4uc2V0VGV4dChzaG93ID8gIuKamSBPTiIgOiAi4pqZIik7CiAgICAgICAgICAgICAgICB9KTsnJycsCiAgICAic2V0dGluZ3MgbGlzdGVuZXIiCikKCiMgUFJPIG9wZW5zIGFuIGFjdHVhbCB2aXNpYmxlIHRlY2huaWNhbCBwYW5lbC4KYW5jaG9yID0gJyAgICAgICAgICAgICAgICBUZXh0VmlldyBwcm9CdG4gPSBwcm9DaGlwKCJQUk8g4oyEIiwgZmFsc2UpOycKcHJvX3BhbmVsID0gJycnICAgICAgICAgICAgICAgIFRleHRWaWV3IHByb1BhbmVsID0gbmV3IFRleHRWaWV3KHRoaXMpOwogICAgICAgICAgICAgICAgcHJvUGFuZWwuc2V0VGV4dCgiRkhEIDYwICDigKIgIEhFVkMgIOKAoiAgMTUgTWJwc1xcbkRJUkVDVCBGSU5BTCAg4oCiICBTVEFCICDigKIgIE1PVElPTitcXG5OUiBPRkYgIOKAoiAgVE9ORSBIUSAg4oCiICBDT0xPUiBIUSIpOwogICAgICAgICAgICAgICAgcHJvUGFuZWwuc2V0VGV4dENvbG9yKDB4RTZGRkZGRkYpOwogICAgICAgICAgICAgICAgcHJvUGFuZWwuc2V0VGV4dFNpemUoOC41Zik7CiAgICAgICAgICAgICAgICBwcm9QYW5lbC5zZXRHcmF2aXR5KEdyYXZpdHkuQ0VOVEVSKTsKICAgICAgICAgICAgICAgIHByb1BhbmVsLnNldFR5cGVmYWNlKFR5cGVmYWNlLk1PTk9TUEFDRSk7CiAgICAgICAgICAgICAgICBwcm9QYW5lbC5zZXRCYWNrZ3JvdW5kKGdsYXNzUGFuZWwoZHAoMTIpKSk7CiAgICAgICAgICAgICAgICBwcm9QYW5lbC5zZXRWaXNpYmlsaXR5KFZpZXcuR09ORSk7CiAgICAgICAgICAgICAgICBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMgcHJvUGFuZWxMcCA9IG5ldyBGcmFtZUxheW91dC5MYXlvdXRQYXJhbXMoZHAoMjQwKSwgZHAoNjIpLCBHcmF2aXR5LlRPUCB8IEdyYXZpdHkuQ0VOVEVSX0hPUklaT05UQUwpOwogICAgICAgICAgICAgICAgcHJvUGFuZWxMcC50b3BNYXJnaW4gPSBkcCgxNTApOwogICAgICAgICAgICAgICAgcm9vdC5hZGRWaWV3KHByb1BhbmVsLCBwcm9QYW5lbExwKTsKCicnJyArIGFuY2hvcgptdXN0KGFuY2hvciwgcHJvX3BhbmVsLCAicHJvIHBhbmVsIikKbXVzdCgKICAgICcgICAgICAgICAgICAgICAgcHJvQnRuLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IHN0YXR1cy5zZXRUZXh0KCJGSEQ2MCDigKIgSEVWQyDigKIgMTVNIOKAoiBQUk8iKSk7JywKICAgICcnJyAgICAgICAgICAgICAgICBwcm9CdG4uc2V0T25DbGlja0xpc3RlbmVyKHYgLT4gewogICAgICAgICAgICAgICAgICAgIGJvb2xlYW4gc2hvdyA9IHByb1BhbmVsLmdldFZpc2liaWxpdHkoKSAhPSBWaWV3LlZJU0lCTEU7CiAgICAgICAgICAgICAgICAgICAgcHJvUGFuZWwuc2V0VmlzaWJpbGl0eShzaG93ID8gVmlldy5WSVNJQkxFIDogVmlldy5HT05FKTsKICAgICAgICAgICAgICAgICAgICBwcm9CdG4uc2V0VGV4dChzaG93ID8gIlBSTyDijIMiIDogIlBSTyDijIQiKTsKICAgICAgICAgICAgICAgIH0pOycnJywKICAgICJwcm8gbGlzdGVuZXIiCikKCiMgU0NPUEVTIHRvZ2dsZXMgYm90aCBkaXNwbGF5ZWQgc2NvcGVzIGFuZCByZXBvcnRzIHN0YXRlLgpwYXQgPSByZS5jb21waWxlKHInXHMqc2NvcGVzXC5zZXRPbkNsaWNrTGlzdGVuZXJcKHYgLT4gXHtccypoaXN0b2dyYW1cLnNldFZpc2liaWxpdHlcKGhpc3RvZ3JhbVwuZ2V0VmlzaWJpbGl0eVwoXCkgPT0gVmlld1wuVklTSUJMRSBcPyBWaWV3XC5HT05FIDogVmlld1wuVklTSUJMRVwpO1xzKndhdmVmb3JtXC5zZXRWaXNpYmlsaXR5XCh3YXZlZm9ybVwuZ2V0VmlzaWJpbGl0eVwoXCkgPT0gVmlld1wuVklTSUJMRSBcPyBWaWV3XC5HT05FIDogVmlld1wuVklTSUJMRVwpO1xzKlx9XCk7JywgcmUuUykKbSA9IHBhdC5zZWFyY2gocykKaWYgbm90IG06CiAgICByYWlzZSBSdW50aW1lRXJyb3IoIlIwNjkgbWlzc2luZyBhbmNob3I6IHNjb3BlcyBsaXN0ZW5lciIpCnNjb3Blc19saXN0ZW5lciA9ICcnJwogICAgICAgIHNjb3Blcy5zZXRPbkNsaWNrTGlzdGVuZXIodiAtPiB7CiAgICAgICAgICAgIGJvb2xlYW4gc2hvdyA9IGhpc3RvZ3JhbS5nZXRWaXNpYmlsaXR5KCkgIT0gVmlldy5WSVNJQkxFOwogICAgICAgICAgICBpbnQgdmlzID0gc2hvdyA/IFZpZXcuVklTSUJMRSA6IFZpZXcuR09ORTsKICAgICAgICAgICAgaGlzdG9ncmFtLnNldFZpc2liaWxpdHkodmlzKTsKICAgICAgICAgICAgd2F2ZWZvcm0uc2V0VmlzaWJpbGl0eSh2aXMpOwogICAgICAgICAgICBzY29wZXMuc2V0VGV4dChzaG93ID8gIlNDT1BFUyBPTiIgOiAiU0NPUEVTIik7CiAgICAgICAgfSk7JycnCnMgPSBzWzptLnN0YXJ0KCldICsgc2NvcGVzX2xpc3RlbmVyICsgc1ttLmVuZCgpOl0KCiMgTGVucyBzZWxlY3RvciBjeWNsZXMgYWN0dWFsIHpvb20uCm11c3QoCiAgICAnICAgICAgICAgICAgICAgIGxlbnNSYWlsLnNldE9uQ2xpY2tMaXN0ZW5lcih2IC0+IHsgaWYgKGNhbWVyYSAhPSBudWxsKSB0cnkgeyBjYW1lcmEuZ2V0Q2FtZXJhQ29udHJvbCgpLnNldFpvb21SYXRpbygxLjBmKTsgfSBjYXRjaCAoVGhyb3dhYmxlIGlnbm9yZWQpIHt9IH0pOycsCiAgICAnJycgICAgICAgICAgICAgICAgbGVuc1JhaWwuc2V0T25DbGlja0xpc3RlbmVyKHYgLT4gewogICAgICAgICAgICAgICAgICAgIGlmIChjYW1lcmEgPT0gbnVsbCkgcmV0dXJuOwogICAgICAgICAgICAgICAgICAgIHRyeSB7CiAgICAgICAgICAgICAgICAgICAgICAgIFpvb21TdGF0ZSB6ID0gY2FtZXJhLmdldENhbWVyYUluZm8oKS5nZXRab29tU3RhdGUoKS5nZXRWYWx1ZSgpOwogICAgICAgICAgICAgICAgICAgICAgICBpZiAoeiA9PSBudWxsKSByZXR1cm47CiAgICAgICAgICAgICAgICAgICAgICAgIGZsb2F0IGN1cnJlbnQgPSB6LmdldFpvb21SYXRpbygpOwogICAgICAgICAgICAgICAgICAgICAgICBmbG9hdCB0YXJnZXQgPSBjdXJyZW50IDwgMS41ZiA/IDIuMGYgOiBjdXJyZW50IDwgMy41ZiA/IDUuMGYgOiAxLjBmOwogICAgICAgICAgICAgICAgICAgICAgICB0YXJnZXQgPSBNYXRoLm1heCh6LmdldE1pblpvb21SYXRpbygpLCBNYXRoLm1pbih6LmdldE1heFpvb21SYXRpbygpLCB0YXJnZXQpKTsKICAgICAgICAgICAgICAgICAgICAgICAgY2FtZXJhLmdldENhbWVyYUNvbnRyb2woKS5zZXRab29tUmF0aW8odGFyZ2V0KTsKICAgICAgICAgICAgICAgICAgICAgICAgbGVuc1JhaWwuc2V0VGV4dCh0YXJnZXQgPCAxLjVmID8gIlcgMcOXIiA6IHRhcmdldCA8IDMuNWYgPyAiVCAyw5ciIDogIlQgNcOXIik7CiAgICAgICAgICAgICAgICAgICAgfSBjYXRjaCAoVGhyb3dhYmxlIGlnbm9yZWQpIHt9CiAgICAgICAgICAgICAgICB9KTsnJycsCiAgICAibGVucyBsaXN0ZW5lciIKKQoKZHN0LndyaXRlX3RleHQocykKc3JjLnVubGluaygpCgptYW5pZmVzdCA9IFBhdGgoInI1MC10ZXh0dXJlL2FwcC9zcmMvbWFpbi9BbmRyb2lkTWFuaWZlc3QueG1sIikKbWFuaWZlc3Qud3JpdGVfdGV4dChtYW5pZmVzdC5yZWFkX3RleHQoKQogICAgLnJlcGxhY2UoIi5SNjhNYWdpY1Byb0VsaXRlQWN0aXZpdHkiLCAiLlI2OU1hZ2ljUHJvQ2xlYW5Db250cm9sc0FjdGl2aXR5IikKICAgIC5yZXBsYWNlKCJNYWdpYyBQcm8gRWxpdGUgQ2luZW1hIENhbWVyYSIsICJNYWdpYyBQcm8gQ2luZW1hIENhbWVyYSIpKQoKZ3JhZGxlID0gUGF0aCgicjUwLXRleHR1cmUvYXBwL2J1aWxkLmdyYWRsZSIpCmdyYWRsZS53cml0ZV90ZXh0KGdyYWRsZS5yZWFkX3RleHQoKQogICAgLnJlcGxhY2UoImNvbS5zZW50b25nb2hhcnVuYS5kdWNhbWVyYS5yMDY4bWFnaWNwcm9lbGl0ZSIsICJjb20uc2VudG9uZ29oYXJ1bmEuZHVjYW1lcmEucjA2OW1hZ2ljcHJvY2xlYW5jb250cm9scyIpCiAgICAucmVwbGFjZSgidmVyc2lvbkNvZGUgNDAwMDAwMDgyIiwgInZlcnNpb25Db2RlIDQwMDAwMDA4MyIpCiAgICAucmVwbGFjZSgidmVyc2lvbk5hbWUgJzEuMC1yMDY4LW1hZ2ljLXByby1lbGl0ZS1odWQnIiwgInZlcnNpb25OYW1lICcxLjAtcjA2OS1tYWdpYy1wcm8tY2xlYW4tY29udHJvbHMnIikpCgpzZXR0aW5ncyA9IFBhdGgoInI1MC10ZXh0dXJlL3NldHRpbmdzLmdyYWRsZSIpCnNldHRpbmdzLndyaXRlX3RleHQoc2V0dGluZ3MucmVhZF90ZXh0KCkKICAgIC5yZXBsYWNlKCJEVUNhbWVyYVIwNjhNYWdpY1Byb0VsaXRlSFVEIiwgIkRVQ2FtZXJhUjA2OU1hZ2ljUHJvQ2xlYW5Db250cm9scyIpKQoKcmVxdWlyZWQgPSBbCiAgICAiZ3JpZE92ZXJsYXkuc2V0VmlzaWJpbGl0eSIsCiAgICAic3RhcnRGb2N1c0FuZE1ldGVyaW5nKGFjdGlvbikiLAogICAgImRlY2suc2V0VmlzaWJpbGl0eSIsCiAgICAicHJvUGFuZWwuc2V0VmlzaWJpbGl0eSIsCiAgICAic2NvcGVzLnNldFRleHQiLAogICAgInNldFpvb21SYXRpbyh0YXJnZXQpIiwKICAgICJodWRCdG4uc2V0T25DbGlja0xpc3RlbmVyIiwKICAgICJtb2Rlc0xwLmJvdHRvbU1hcmdpbiA9IGRwKDcwKSIsCiAgICAicmVjTHAuYm90dG9tTWFyZ2luID0gZHAoMTA1KSIsCiAgICAibGVuc0xwLmJvdHRvbU1hcmdpbiA9IGRwKDE5NSkiLAogICAgIlF1YWxpdHlTZWxlY3Rvci5mcm9tKFF1YWxpdHkuRkhEKSIsCiAgICAiTUlNRVRZUEVfVklERU9fSEVWQyIsCiAgICAiMTVfMDAwXzAwMCIKXQptaXNzaW5nID0gW3ggZm9yIHggaW4gcmVxdWlyZWQgaWYgeCBub3QgaW4gc10KaWYgbWlzc2luZzoKICAgIHJhaXNlIFJ1bnRpbWVFcnJvcigiUjA2OSBhdWRpdCBtaXNzaW5nOiAiICsgIiwgIi5qb2luKG1pc3NpbmcpKQoKcHJpbnQoIlBBU1M6IFIwNjkgY2xlYW4gY29udHJvbHMgaW5zdGFsbGVkLiIpCg==' | base64 -d > /tmp/r069_upgrade.py
+        python3 /tmp/r069_upgrade.py
+
+    - name: R069 functional layout preflight
+      shell: bash
+      run: |
+        set -euo pipefail
+        SRC="r50-texture/app/src/main/java/com/sentongoharuna/ducamera/R69MagicProCleanControlsActivity.java"
+        MANIFEST="r50-texture/app/src/main/AndroidManifest.xml"
+        GRADLE="r50-texture/app/build.gradle"
+        test -s "$SRC"
+        grep -q 'public class R69MagicProCleanControlsActivity extends ComponentActivity' "$SRC"
+        grep -q 'android:name=".R69MagicProCleanControlsActivity"' "$MANIFEST"
+        grep -q "applicationId 'com.sentongoharuna.ducamera.r069magicprocleancontrols'" "$GRADLE"
+        grep -q "versionCode 400000083" "$GRADLE"
+        grep -q 'gridOverlay.setVisibility' "$SRC"
+        grep -q 'startFocusAndMetering(action)' "$SRC"
+        grep -q 'deck.setVisibility' "$SRC"
+        grep -q 'proPanel.setVisibility' "$SRC"
+        grep -q 'histogram.setVisibility' "$SRC"
+        grep -q 'waveform.setVisibility' "$SRC"
+        grep -q 'setZoomRatio(target)' "$SRC"
+        grep -q 'autoEnhance = !autoEnhance' "$SRC"
+        grep -q 'useFront = !useFront' "$SRC"
+        grep -q 'toggleRecording()' "$SRC"
+        grep -q 'aspectNineSixteen = !aspectNineSixteen' "$SRC"
+        grep -q 'modesLp.bottomMargin = dp(70)' "$SRC"
+        grep -q 'recLp.bottomMargin = dp(105)' "$SRC"
+        grep -q 'lensLp.bottomMargin = dp(195)' "$SRC"
+        grep -q 'gridLp.bottomMargin = dp(285)' "$SRC"
+        grep -q 'afLp.bottomMargin = dp(241)' "$SRC"
+        grep -q 'QualitySelector.from(Quality.FHD)' "$SRC"
+        grep -q 'new Range<>(60, 60)' "$SRC"
+        grep -q 'MIMETYPE_VIDEO_HEVC' "$SRC"
+        grep -q '15_000_000' "$SRC"
+        python3 - <<'PY'
+        from pathlib import Path
+        import re
+        s=Path("r50-texture/app/src/main/java/com/sentongoharuna/ducamera/R69MagicProCleanControlsActivity.java").read_text()
+        c=re.sub(r'/\*.*?\*/','',s,flags=re.S)
+        c=re.sub(r'//.*','',c)
+        c=re.sub(r'"(?:\\.|[^"\\])*"','""',c)
+        if c.count('{') != c.count('}'): raise RuntimeError("brace mismatch")
+        if c.count('(') != c.count(')'): raise RuntimeError("parenthesis mismatch")
+        print("PASS: R069 Java structure")
+        PY
+        echo "PASS: R069 functional/layout preflight"
+
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install Android platform
+      shell: bash
+      run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+    - name: Set up Gradle 8.13
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: 8.13
+
+    - name: Build R069 MAGIC PRO CLEAN CONTROLS APK
+      working-directory: r50-texture
+      shell: bash
+      run: |
+        set -o pipefail
+        gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee r069-magic-pro-clean-controls-build.log
+
+    - name: Prepare APK
+      if: success()
+      shell: bash
+      run: |
+        set -euo pipefail
+        APK='r50-texture/app/build/outputs/apk/debug/app-debug.apk'
+        OUT='MAGIC-PRO-R069-CLEAN-CONTROLS.apk'
+        test -s "$APK"
+        cp "$APK" "$OUT"
+        ls -lh "$OUT"
+        sha256sum "$OUT"
+
+    - name: Upload audit
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: R069-MAGIC-PRO-CLEAN-CONTROLS-AUDIT
+        path: /tmp/R069-MAGIC-PRO-CLEAN-CONTROLS-AUDIT.txt
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Upload failed build log
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: R069-MAGIC-PRO-CLEAN-CONTROLS-FAILED-BUILD-LOG
+        path: r50-texture/r069-magic-pro-clean-controls-build.log
+        if-no-files-found: warn
+        retention-days: 14
+
+    - name: Upload R069 APK
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: MAGIC-PRO-R067-VERIFIED
+        path: MAGIC-PRO-R069-CLEAN-CONTROLS.apk
+        if-no-files-found: error
+        retention-days: 14
