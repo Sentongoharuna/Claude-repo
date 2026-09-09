@@ -1,0 +1,252 @@
+name: Build DU Camera R055 COMPRESSION SURVIVAL PRO APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R055-COMPRESSION-SURVIVAL-PRO.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r055_compression_survival:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate R51 locked base and apply compression-survival tuning
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          # ------------------------------------------------------------
+          # 1) Recreate the proven R50 source already stored in repo.
+          # ------------------------------------------------------------
+          wf = Path('.github/workflows/BUILD-DU-CAMERA-R050-REFERENCE-TEXTURE-BALANCE-PRO.yml').read_text()
+
+          marker = '    - name: Create R047 Reference Rich Image Pro from proven R45 quality master\n'
+          start = wf.index(marker)
+          runpos = wf.index('      run: |\n', start) + len('      run: |\n')
+          end = wf.index('\n    - name: Set up Java 17', runpos)
+
+          block = wf[runpos:end]
+          lines = []
+          for ln in block.splitlines():
+              lines.append(ln[8:] if ln.startswith('        ') else ln)
+
+          Path('/tmp/r50-create.sh').write_text('\n'.join(lines) + '\n')
+          subprocess.run(['bash', '/tmp/r50-create.sh'], check=True)
+
+          srcdir = Path('r50-texture')
+          old = srcdir / 'app/src/main/java/com/sentongoharuna/ducamera/R50ReferenceTextureBalanceCameraActivity.java'
+          new = srcdir / 'app/src/main/java/com/sentongoharuna/ducamera/R55CompressionSurvivalCameraActivity.java'
+
+          text = old.read_text()
+
+          # ------------------------------------------------------------
+          # 2) Rebuild the R51 LOCKED MASTER identity/UI first.
+          #    Capture engine remains the R50/R51 proven engine.
+          # ------------------------------------------------------------
+          for a, b in {
+              'R50ReferenceTextureBalanceCameraActivity': 'R55CompressionSurvivalCameraActivity',
+              'com.sentongoharuna.ducamera.r050referencetexturebalancepro': 'com.sentongoharuna.ducamera.r055compressionsurvival',
+              "versionCode 400000064": "versionCode 400000069",
+              "versionName '1.0-r050-reference-texture-balance-pro'": "versionName '1.0-r055-compression-survival-pro'",
+              'DU Camera R50 Texture Balance': 'DU Camera R55 Compression Survival',
+              'R50 TEXTURE': 'R55 SURVIVE',
+              'R50 TEXTURE • OPENING': 'R55 SURVIVE • OPENING',
+              'DU_R50_TEXTURE_BALANCE_': 'DU_R55_COMPRESSION_SURVIVAL_',
+              'Movies/DU Camera/R50 Texture Balance': 'Movies/DU Camera/R55 Compression Survival'
+          }.items():
+              text = text.replace(a, b)
+
+          # Preserve R51 interface additions.
+          text = text.replace(
+              'private TextView enhanceButton;',
+              'private TextView enhanceButton;\n'
+              '            private LinearLayout qualityRail;\n'
+              '            private TextView r51UiButton;\n'
+              '            private TextView gridButton;\n'
+              '            private boolean qualityRailVisible = false;\n'
+              '            private boolean gridOn = false;'
+          )
+
+          text = text.replace(
+              'LinearLayout qualityRail = new LinearLayout(this);',
+              'qualityRail = new LinearLayout(this);'
+          )
+
+          anchor = 'root.addView(master, masterLp);'
+          text = text.replace(
+              anchor,
+              anchor +
+              '\n\n                r51UiButton = button("R51 UI");'
+              '\n                FrameLayout.LayoutParams r51Lp = new FrameLayout.LayoutParams(dp(82), dp(38), Gravity.TOP | Gravity.START);'
+              '\n                r51Lp.leftMargin = dp(12);'
+              '\n                r51Lp.topMargin = dp(62);'
+              '\n                root.addView(r51UiButton, r51Lp);'
+              '\n                r51UiButton.setOnClickListener(v -> {'
+              '\n                    qualityRailVisible = !qualityRailVisible;'
+              '\n                    if (qualityRail != null) qualityRail.setVisibility(qualityRailVisible ? View.VISIBLE : View.GONE);'
+              '\n                    r51UiButton.setText(qualityRailVisible ? "R51 HIDE" : "R51 UI");'
+              '\n                });',
+              1
+          )
+
+          rail_anchor = 'qualityRail.setGravity(Gravity.CENTER);'
+          text = text.replace(
+              rail_anchor,
+              rail_anchor + '\n                qualityRail.setVisibility(View.GONE);',
+              1
+          )
+
+          text = text.replace(
+              'setContentView(root);',
+              'gridButton = button("GRID OFF");\n'
+              '                FrameLayout.LayoutParams gridLp = new FrameLayout.LayoutParams(dp(88), dp(38), Gravity.BOTTOM | Gravity.END);\n'
+              '                gridLp.rightMargin = dp(12);\n'
+              '                gridLp.bottomMargin = dp(72);\n'
+              '                root.addView(gridButton, gridLp);\n'
+              '                gridButton.setOnClickListener(v -> {\n'
+              '                    gridOn = !gridOn;\n'
+              '                    gridButton.setText(gridOn ? "GRID ON" : "GRID OFF");\n'
+              '                });\n\n'
+              '                setContentView(root);',
+              1
+          )
+
+          # ------------------------------------------------------------
+          # 3) COMPRESSION-SURVIVAL TUNING.
+          #
+          # From our original-vs-compressed test:
+          # - resolution/fps survived
+          # - bitrate dropped materially
+          # - fine texture weakened modestly
+          #
+          # So: a visibly stronger structure/colour-separation profile intended to survive social-media recompression.
+          # No synthetic sharpness filter, no exposure bias, and no codec/bitrate downgrade.
+          # ------------------------------------------------------------
+          text = text.replace('new Contrast(0.035f)', 'new Contrast(0.070f)')
+          text = text.replace('.adjustSaturation(2.5f)', '.adjustSaturation(3.6f)')
+          text = text.replace('.adjustLightness(1.0f)', '.adjustLightness(0.55f)')
+
+          # Keep warm RGB balance essentially unchanged, only microscopic red lift.
+          text = text.replace('.setRedScale(1.008f)', '.setRedScale(1.010f)')
+
+          # Keep the proven direct encoding target unchanged.
+          # 1080p60 + HEVC + 15 Mbps remains the master delivery profile.
+
+          new.write_text(text)
+          old.unlink()
+
+          manifest = srcdir / 'app/src/main/AndroidManifest.xml'
+          manifest.write_text(
+              manifest.read_text()
+              .replace('.R50ReferenceTextureBalanceCameraActivity', '.R55CompressionSurvivalCameraActivity')
+              .replace('DU Camera R50 Texture Balance', 'DU Camera R55 Compression Survival')
+          )
+
+          gradle = srcdir / 'app/build.gradle'
+          gradle.write_text(
+              gradle.read_text()
+              .replace('com.sentongoharuna.ducamera.r050referencetexturebalancepro', 'com.sentongoharuna.ducamera.r055compressionsurvival')
+              .replace('versionCode 400000064', 'versionCode 400000069')
+              .replace("versionName '1.0-r050-reference-texture-balance-pro'", "versionName '1.0-r055-compression-survival-pro'")
+          )
+
+          settings = srcdir / 'settings.gradle'
+          settings.write_text(
+              settings.read_text().replace(
+                  'DUCameraR050ReferenceTextureBalancePro',
+                  'DUCameraR055CompressionSurvivalPro'
+              )
+          )
+
+          # ------------------------------------------------------------
+          # 4) Guardrails: fail build if the locked R51/R50 engine was lost.
+          # ------------------------------------------------------------
+          checks = [
+              '15_000_000',
+              'MediaFormat.MIMETYPE_VIDEO_HEVC',
+              'QualitySelector.from(Quality.FHD)',
+              'NOISE_REDUCTION_MODE_OFF',
+              'TONEMAP_MODE_HIGH_QUALITY',
+              'COLOR_CORRECTION_MODE_HIGH_QUALITY',
+              'R51 UI',
+              'GRID OFF',
+              'new Contrast(0.070f)',
+              '.adjustSaturation(3.6f)',
+              '.adjustLightness(0.55f)',
+              '.setRedScale(1.010f)'
+          ]
+
+          for c in checks:
+              assert c in text, f'R55 audit failed: missing {c}'
+
+          # Also ensure we did NOT add risky sharpening.
+          assert 'Sharpness' not in text
+
+          print('PASS: R55 preserves the R51 base and applies TikTok visual-survival tuning.')
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Build R055 COMPRESSION SURVIVAL PRO APK
+        working-directory: r50-texture
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee r055-tiktok-visual-survival-build.log
+
+      - name: Prepare APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='r50-texture/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R055-COMPRESSION-SURVIVAL-PRO.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R055-TIKTOK-VISUAL-SURVIVAL-FAILED-BUILD-LOG
+          path: r50-texture/r055-tiktok-visual-survival-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload R055 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R055-COMPRESSION-SURVIVAL-PRO
+          path: DU-Camera-R055-COMPRESSION-SURVIVAL-PRO.apk
+          if-no-files-found: error
+          retention-days: 30
