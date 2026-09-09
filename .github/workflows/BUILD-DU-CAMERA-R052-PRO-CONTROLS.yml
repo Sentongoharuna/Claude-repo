@@ -1,0 +1,204 @@
+name: Build DU Camera R052 PRO CONTROLS APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R052-PRO-CONTROLS.yml'
+      - '.github/workflows/BUILD-DU-CAMERA-R051-LOCKED-MASTER.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r052_pro_controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate R51 locked master then add R52 controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          wf = Path('.github/workflows/BUILD-DU-CAMERA-R051-LOCKED-MASTER.yml').read_text()
+          marker = '      - name: Generate exact R50 source then upgrade to R51 master\n'
+          start = wf.index(marker)
+          runpos = wf.index('        run: |\n', start) + len('        run: |\n')
+          end = wf.index('\n      - name: Set up Java 17', runpos)
+
+          block=wf[runpos:end]
+          lines=[]
+          for ln in block.splitlines():
+              lines.append(ln[10:] if ln.startswith('          ') else ln)
+
+          Path('/tmp/r51-create.sh').write_text('\n'.join(lines)+'\n')
+          subprocess.run(['bash','/tmp/r51-create.sh'], check=True)
+
+          srcdir=Path('r50-texture')
+          old=srcdir/'app/src/main/java/com/sentongoharuna/ducamera/R51LockedMasterCameraActivity.java'
+          new=srcdir/'app/src/main/java/com/sentongoharuna/ducamera/R52ProControlsCameraActivity.java'
+          text=old.read_text()
+
+          for a,b in {
+            'R51LockedMasterCameraActivity':'R52ProControlsCameraActivity',
+            'com.sentongoharuna.ducamera.r051lockedmaster':'com.sentongoharuna.ducamera.r052procontrols',
+            "versionCode 400000065":"versionCode 400000066",
+            "versionName '1.0-r051-locked-master'":"versionName '1.0-r052-pro-controls'",
+            'DU Camera R51 Locked Master':'DU Camera R52 Pro Controls',
+            'R51 MASTER':'R52 PRO',
+            'DU_R51_LOCKED_MASTER_':'DU_R52_PRO_CONTROLS_',
+            'Movies/DU Camera/R51 Locked Master':'Movies/DU Camera/R52 Pro Controls'
+          }.items():
+              text=text.replace(a,b)
+
+          text=text.replace(
+              'private boolean gridOn = false;',
+              'private boolean gridOn = false;\n'
+              '            private TextView zoomReadout;\n'
+              '            private TextView recBadge;\n'
+              '            private TextView focusReticle;'
+          )
+
+          anchor='setContentView(root);'
+          extra = (
+              'zoomReadout = button("1.0x");\n'
+              '                FrameLayout.LayoutParams zoomLp = new FrameLayout.LayoutParams(dp(72), dp(36), Gravity.BOTTOM | Gravity.START);\n'
+              '                zoomLp.leftMargin = dp(12);\n'
+              '                zoomLp.bottomMargin = dp(72);\n'
+              '                root.addView(zoomReadout, zoomLp);\n\n'
+              '                recBadge = button("STBY");\n'
+              '                FrameLayout.LayoutParams recLp = new FrameLayout.LayoutParams(dp(72), dp(36), Gravity.TOP | Gravity.CENTER_HORIZONTAL);\n'
+              '                recLp.topMargin = dp(16);\n'
+              '                root.addView(recBadge, recLp);\n\n'
+              '                focusReticle = new TextView(this);\n'
+              '                focusReticle.setText("□");\n'
+              '                focusReticle.setTextColor(Color.WHITE);\n'
+              '                focusReticle.setTextSize(36f);\n'
+              '                focusReticle.setGravity(Gravity.CENTER);\n'
+              '                focusReticle.setVisibility(View.GONE);\n'
+              '                FrameLayout.LayoutParams focusLp = new FrameLayout.LayoutParams(dp(72), dp(72), Gravity.CENTER);\n'
+              '                root.addView(focusReticle, focusLp);\n\n'
+              '                previewView.setOnTouchListener((v, event) -> {\n'
+              '                    if (event.getAction() == MotionEvent.ACTION_UP && camera != null) {\n'
+              '                        MeteringPoint p = previewView.getMeteringPointFactory().createPoint(event.getX(), event.getY());\n'
+              '                        FocusMeteringAction action = new FocusMeteringAction.Builder(\n'
+              '                            p, FocusMeteringAction.FLAG_AF | FocusMeteringAction.FLAG_AE\n'
+              '                        ).setAutoCancelDuration(3, TimeUnit.SECONDS).build();\n'
+              '                        camera.getCameraControl().startFocusAndMetering(action);\n'
+              '                        focusReticle.setX(event.getX() - dp(36));\n'
+              '                        focusReticle.setY(event.getY() - dp(36));\n'
+              '                        focusReticle.setVisibility(View.VISIBLE);\n'
+              '                        focusReticle.postDelayed(() -> focusReticle.setVisibility(View.GONE), 900L);\n'
+              '                        return true;\n'
+              '                    }\n'
+              '                    return scaleDetector != null && scaleDetector.onTouchEvent(event);\n'
+              '                });\n\n'
+              '                setContentView(root);'
+          )
+          text=text.replace(anchor, extra, 1)
+
+          marker='camera = candidateCamera;\n                    videoCapture = candidateVideo;'
+          text=text.replace(
+              marker,
+              marker +
+              '\n                    camera.getCameraInfo().getZoomState().observe(this, z -> {'
+              '\n                        if (z != null && zoomReadout != null) {'
+              '\n                            zoomReadout.setText(String.format(Locale.US, "%.1fx", z.getZoomRatio()));'
+              '\n                        }'
+              '\n                    });',
+              1
+          )
+
+          text=text.replace(
+              'recordButton.setText("STOP");',
+              'recordButton.setText("STOP");\n                                if (recBadge != null) recBadge.setText("REC");',
+              1
+          )
+          text=text.replace(
+              'recordButton.setText("RECORD");',
+              'recordButton.setText("RECORD");\n                                if (recBadge != null) recBadge.setText("STBY");',
+              1
+          )
+
+          new.write_text(text)
+          old.unlink()
+
+          manifest=srcdir/'app/src/main/AndroidManifest.xml'
+          manifest.write_text(
+              manifest.read_text()
+              .replace('.R51LockedMasterCameraActivity','.R52ProControlsCameraActivity')
+              .replace('DU Camera R51 Locked Master','DU Camera R52 Pro Controls')
+          )
+
+          gradle=srcdir/'app/build.gradle'
+          gradle.write_text(
+              gradle.read_text()
+              .replace('com.sentongoharuna.ducamera.r051lockedmaster','com.sentongoharuna.ducamera.r052procontrols')
+              .replace('versionCode 400000065','versionCode 400000066')
+              .replace("versionName '1.0-r051-locked-master'","versionName '1.0-r052-pro-controls'")
+          )
+
+          settings=srcdir/'settings.gradle'
+          settings.write_text(settings.read_text().replace('DUCameraR051LockedMaster','DUCameraR052ProControls'))
+
+          checks=[
+              '15_000_000',
+              'MediaFormat.MIMETYPE_VIDEO_HEVC',
+              'QualitySelector.from(Quality.FHD)',
+              'new Contrast(0.035f)',
+              '.adjustSaturation(2.5f)',
+              '.setRedScale(1.008f)',
+              'NOISE_REDUCTION_MODE_OFF',
+              'TONEMAP_MODE_HIGH_QUALITY',
+              'R51 UI',
+              'GRID OFF'
+          ]
+          for c in checks:
+              assert c in text, f'R52 lost R51/R50 master marker: {c}'
+
+          print('PASS: R52 adds pro controls on top of locked R51 master.')
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Build R052 PRO CONTROLS APK
+        working-directory: r50-texture
+        shell: bash
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Prepare APK
+        shell: bash
+        run: |
+          cp r50-texture/app/build/outputs/apk/debug/app-debug.apk DU-Camera-R052-PRO-CONTROLS.apk
+          sha256sum DU-Camera-R052-PRO-CONTROLS.apk
+
+      - name: Upload R052 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R052-PRO-CONTROLS
+          path: DU-Camera-R052-PRO-CONTROLS.apk
+          if-no-files-found: error
+          retention-days: 30
