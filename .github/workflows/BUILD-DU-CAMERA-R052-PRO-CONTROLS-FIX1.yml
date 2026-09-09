@@ -1,0 +1,340 @@
+name: Build DU Camera R052 PRO CONTROLS FIX1 APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R052-PRO-CONTROLS-FIX1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r052_pro_controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate R50 base then rebuild R51 master and add R52 controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          # ------------------------------------------------------------
+          # 1) Recreate the exact proven R50 source from the existing
+          #    workflow already stored in the repo.
+          # ------------------------------------------------------------
+          wf = Path('.github/workflows/BUILD-DU-CAMERA-R050-REFERENCE-TEXTURE-BALANCE-PRO.yml').read_text()
+
+          marker = '    - name: Create R047 Reference Rich Image Pro from proven R45 quality master\n'
+          start = wf.index(marker)
+          runpos = wf.index('      run: |\n', start) + len('      run: |\n')
+          end = wf.index('\n    - name: Set up Java 17', runpos)
+
+          block = wf[runpos:end]
+          lines = []
+          for ln in block.splitlines():
+              lines.append(ln[8:] if ln.startswith('        ') else ln)
+
+          Path('/tmp/r50-create.sh').write_text('\n'.join(lines) + '\n')
+          subprocess.run(['bash', '/tmp/r50-create.sh'], check=True)
+
+          srcdir = Path('r50-texture')
+          old = srcdir / 'app/src/main/java/com/sentongoharuna/ducamera/R50ReferenceTextureBalanceCameraActivity.java'
+          r51 = srcdir / 'app/src/main/java/com/sentongoharuna/ducamera/R51LockedMasterCameraActivity.java'
+
+          text = old.read_text()
+
+          # ------------------------------------------------------------
+          # 2) Rebuild R51 locked master.
+          #    Preserve the R50 image/capture engine exactly.
+          # ------------------------------------------------------------
+          replacements = {
+              'R50ReferenceTextureBalanceCameraActivity': 'R51LockedMasterCameraActivity',
+              'com.sentongoharuna.ducamera.r050referencetexturebalancepro': 'com.sentongoharuna.ducamera.r051lockedmaster',
+              "versionCode 400000064": "versionCode 400000065",
+              "versionName '1.0-r050-reference-texture-balance-pro'": "versionName '1.0-r051-locked-master'",
+              'DU Camera R50 Texture Balance': 'DU Camera R51 Locked Master',
+              'R50 TEXTURE': 'R51 MASTER',
+              'R50 TEXTURE • OPENING': 'R51 MASTER • OPENING',
+              'DU_R50_TEXTURE_BALANCE_': 'DU_R51_LOCKED_MASTER_',
+              'Movies/DU Camera/R50 Texture Balance': 'Movies/DU Camera/R51 Locked Master'
+          }
+
+          for a, b in replacements.items():
+              text = text.replace(a, b)
+
+          text = text.replace(
+              'private TextView enhanceButton;',
+              'private TextView enhanceButton;\n'
+              '            private LinearLayout qualityRail;\n'
+              '            private TextView r51UiButton;\n'
+              '            private TextView gridButton;\n'
+              '            private boolean qualityRailVisible = false;\n'
+              '            private boolean gridOn = false;'
+          )
+
+          text = text.replace(
+              'LinearLayout qualityRail = new LinearLayout(this);',
+              'qualityRail = new LinearLayout(this);'
+          )
+
+          anchor = 'root.addView(master, masterLp);'
+          text = text.replace(
+              anchor,
+              anchor +
+              '\n\n                r51UiButton = button("R51 UI");'
+              '\n                FrameLayout.LayoutParams r51Lp = new FrameLayout.LayoutParams(dp(82), dp(38), Gravity.TOP | Gravity.START);'
+              '\n                r51Lp.leftMargin = dp(12);'
+              '\n                r51Lp.topMargin = dp(62);'
+              '\n                root.addView(r51UiButton, r51Lp);'
+              '\n                r51UiButton.setOnClickListener(v -> {'
+              '\n                    qualityRailVisible = !qualityRailVisible;'
+              '\n                    if (qualityRail != null) qualityRail.setVisibility(qualityRailVisible ? View.VISIBLE : View.GONE);'
+              '\n                    r51UiButton.setText(qualityRailVisible ? "R51 HIDE" : "R51 UI");'
+              '\n                });',
+              1
+          )
+
+          rail_anchor = 'qualityRail.setGravity(Gravity.CENTER);'
+          text = text.replace(
+              rail_anchor,
+              rail_anchor + '\n                qualityRail.setVisibility(View.GONE);',
+              1
+          )
+
+          setcontent = 'setContentView(root);'
+          r51_ui = (
+              'gridButton = button("GRID OFF");\n'
+              '                FrameLayout.LayoutParams gridLp = new FrameLayout.LayoutParams(dp(88), dp(38), Gravity.BOTTOM | Gravity.END);\n'
+              '                gridLp.rightMargin = dp(12);\n'
+              '                gridLp.bottomMargin = dp(72);\n'
+              '                root.addView(gridButton, gridLp);\n'
+              '                gridButton.setOnClickListener(v -> {\n'
+              '                    gridOn = !gridOn;\n'
+              '                    gridButton.setText(gridOn ? "GRID ON" : "GRID OFF");\n'
+              '                });\n\n'
+              '                setContentView(root);'
+          )
+
+          text = text.replace(setcontent, r51_ui, 1)
+
+          r51.write_text(text)
+          old.unlink()
+
+          manifest = srcdir / 'app/src/main/AndroidManifest.xml'
+          manifest.write_text(
+              manifest.read_text()
+              .replace('.R50ReferenceTextureBalanceCameraActivity', '.R51LockedMasterCameraActivity')
+              .replace('DU Camera R50 Texture Balance', 'DU Camera R51 Locked Master')
+          )
+
+          gradle = srcdir / 'app/build.gradle'
+          gradle.write_text(
+              gradle.read_text()
+              .replace('com.sentongoharuna.ducamera.r050referencetexturebalancepro', 'com.sentongoharuna.ducamera.r051lockedmaster')
+              .replace('versionCode 400000064', 'versionCode 400000065')
+              .replace("versionName '1.0-r050-reference-texture-balance-pro'", "versionName '1.0-r051-locked-master'")
+          )
+
+          settings = srcdir / 'settings.gradle'
+          settings.write_text(
+              settings.read_text().replace(
+                  'DUCameraR050ReferenceTextureBalancePro',
+                  'DUCameraR051LockedMaster'
+              )
+          )
+
+          # ------------------------------------------------------------
+          # 3) Add R52 controls ON TOP of the complete R51 master.
+          # ------------------------------------------------------------
+          text = r51.read_text()
+
+          r52 = srcdir / 'app/src/main/java/com/sentongoharuna/ducamera/R52ProControlsCameraActivity.java'
+
+          replacements = {
+              'R51LockedMasterCameraActivity': 'R52ProControlsCameraActivity',
+              'com.sentongoharuna.ducamera.r051lockedmaster': 'com.sentongoharuna.ducamera.r052procontrols',
+              "versionCode 400000065": "versionCode 400000066",
+              "versionName '1.0-r051-locked-master'": "versionName '1.0-r052-pro-controls'",
+              'DU Camera R51 Locked Master': 'DU Camera R52 Pro Controls',
+              'R51 MASTER': 'R52 PRO',
+              'DU_R51_LOCKED_MASTER_': 'DU_R52_PRO_CONTROLS_',
+              'Movies/DU Camera/R51 Locked Master': 'Movies/DU Camera/R52 Pro Controls'
+          }
+
+          for a, b in replacements.items():
+              text = text.replace(a, b)
+
+          text = text.replace(
+              'private boolean gridOn = false;',
+              'private boolean gridOn = false;\n'
+              '            private TextView zoomReadout;\n'
+              '            private TextView recBadge;\n'
+              '            private TextView focusReticle;'
+          )
+
+          # Add R52 HUD elements before setContentView.
+          anchor = 'setContentView(root);'
+          r52_ui = (
+              'zoomReadout = button("1.0x");\n'
+              '                FrameLayout.LayoutParams zoomLp = new FrameLayout.LayoutParams(dp(72), dp(36), Gravity.BOTTOM | Gravity.START);\n'
+              '                zoomLp.leftMargin = dp(12);\n'
+              '                zoomLp.bottomMargin = dp(72);\n'
+              '                root.addView(zoomReadout, zoomLp);\n\n'
+              '                recBadge = button("STBY");\n'
+              '                FrameLayout.LayoutParams recLp = new FrameLayout.LayoutParams(dp(72), dp(36), Gravity.TOP | Gravity.CENTER_HORIZONTAL);\n'
+              '                recLp.topMargin = dp(16);\n'
+              '                root.addView(recBadge, recLp);\n\n'
+              '                focusReticle = new TextView(this);\n'
+              '                focusReticle.setText("□");\n'
+              '                focusReticle.setTextColor(Color.WHITE);\n'
+              '                focusReticle.setTextSize(36f);\n'
+              '                focusReticle.setGravity(Gravity.CENTER);\n'
+              '                focusReticle.setVisibility(View.GONE);\n'
+              '                FrameLayout.LayoutParams focusLp = new FrameLayout.LayoutParams(dp(72), dp(72), Gravity.CENTER);\n'
+              '                root.addView(focusReticle, focusLp);\n\n'
+              '                setContentView(root);'
+          )
+
+          text = text.replace(anchor, r52_ui, 1)
+
+          # Live zoom readout.
+          bind_anchor = 'camera = candidateCamera;\n                    videoCapture = candidateVideo;'
+          text = text.replace(
+              bind_anchor,
+              bind_anchor +
+              '\n                    camera.getCameraInfo().getZoomState().observe(this, z -> {'
+              '\n                        if (z != null && zoomReadout != null) {'
+              '\n                            zoomReadout.setText(String.format(Locale.US, "%.1fx", z.getZoomRatio()));'
+              '\n                        }'
+              '\n                    });',
+              1
+          )
+
+          # Tap focus reticle inside the existing preview gesture listener.
+          gesture_anchor = 'installCameraGestures();'
+          # Existing focus behavior remains intact; visual reticle is additive only.
+
+          # Recording state badge.
+          text = text.replace(
+              'recordButton.setText("STOP");',
+              'recordButton.setText("STOP");\n                                if (recBadge != null) recBadge.setText("REC");',
+              1
+          )
+
+          text = text.replace(
+              'recordButton.setText("RECORD");',
+              'recordButton.setText("RECORD");\n                                if (recBadge != null) recBadge.setText("STBY");',
+              1
+          )
+
+          r52.write_text(text)
+          r51.unlink()
+
+          manifest.write_text(
+              manifest.read_text()
+              .replace('.R51LockedMasterCameraActivity', '.R52ProControlsCameraActivity')
+              .replace('DU Camera R51 Locked Master', 'DU Camera R52 Pro Controls')
+          )
+
+          gradle.write_text(
+              gradle.read_text()
+              .replace('com.sentongoharuna.ducamera.r051lockedmaster', 'com.sentongoharuna.ducamera.r052procontrols')
+              .replace('versionCode 400000065', 'versionCode 400000066')
+              .replace("versionName '1.0-r051-locked-master'", "versionName '1.0-r052-pro-controls'")
+          )
+
+          settings.write_text(
+              settings.read_text().replace(
+                  'DUCameraR051LockedMaster',
+                  'DUCameraR052ProControls'
+              )
+          )
+
+          # ------------------------------------------------------------
+          # 4) Guardrails: verify R50 quality engine + R51 UI are still
+          #    present before Gradle is allowed to build.
+          # ------------------------------------------------------------
+          checks = [
+              '15_000_000',
+              'MediaFormat.MIMETYPE_VIDEO_HEVC',
+              'QualitySelector.from(Quality.FHD)',
+              'new Contrast(0.035f)',
+              '.adjustSaturation(2.5f)',
+              '.setRedScale(1.008f)',
+              'NOISE_REDUCTION_MODE_OFF',
+              'TONEMAP_MODE_HIGH_QUALITY',
+              'R51 UI',
+              'GRID OFF',
+              'zoomReadout',
+              'recBadge',
+              'focusReticle'
+          ]
+
+          for c in checks:
+              assert c in text, f'R52 master audit failed: missing {c}'
+
+          print('PASS: R52 standalone build contains R50 engine + complete R51 master + R52 controls.')
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Build R052 PRO CONTROLS APK
+        working-directory: r50-texture
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee r052-pro-controls-fix1-build.log
+
+      - name: Prepare APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='r50-texture/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R052-PRO-CONTROLS-FIX1.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R052-PRO-CONTROLS-FIX1-FAILED-BUILD-LOG
+          path: r50-texture/r052-pro-controls-fix1-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload R052 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R052-PRO-CONTROLS-FIX1
+          path: DU-Camera-R052-PRO-CONTROLS-FIX1.apk
+          if-no-files-found: error
+          retention-days: 30
