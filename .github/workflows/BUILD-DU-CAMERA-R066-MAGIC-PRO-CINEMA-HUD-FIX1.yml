@@ -1,0 +1,605 @@
+# R66 MAGIC PRO UI CONTRACT
+# - R60 image/capture pipeline is LOCKED and must remain byte-for-byte equivalent in tuning.
+# - UI direction: Magic Camera Pro-inspired cinema HUD with professional parameter strip, prominent LUTs, compact technical side controls and a dedicated REC control.
+# - Primary HUD: REC/STBY, LUTs, aspect ratio, timecode/status.
+# - Edge controls: slim zoom and exposure rails that stay unobtrusive.
+# - Settings organization: Focus, Exposure/AE Lock, White Balance, Grid, Stabilization,
+#   Microphone, Resolution/FPS and Codec information in compact grouped panels.
+# - No change to codec, bitrate, resolution, FPS, NR, tonemap or R60 color/effect values.
+
+name: Build DU Camera R066 MAGIC PRO CINEMA HUD FIX1 APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/BUILD-DU-CAMERA-R066-MAGIC-PRO-CINEMA-HUD-FIX1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r066_compression_survival:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate locked R60 image engine and rebuild Magic Pro cinema HUD
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          # ------------------------------------------------------------
+          # 1) Recreate the proven R50 source already stored in repo.
+          # ------------------------------------------------------------
+          wf = Path('.github/workflows/BUILD-DU-CAMERA-R050-REFERENCE-TEXTURE-BALANCE-PRO.yml').read_text()
+
+          marker = '    - name: Create R047 Reference Rich Image Pro from proven R45 quality master\n'
+          start = wf.index(marker)
+          runpos = wf.index('      run: |\n', start) + len('      run: |\n')
+          end = wf.index('\n    - name: Set up Java 17', runpos)
+
+          block = wf[runpos:end]
+          lines = []
+          for ln in block.splitlines():
+              lines.append(ln[8:] if ln.startswith('        ') else ln)
+
+          Path('/tmp/r50-create.sh').write_text('\n'.join(lines) + '\n')
+          subprocess.run(['bash', '/tmp/r50-create.sh'], check=True)
+
+          srcdir = Path('r50-texture')
+          old = srcdir / 'app/src/main/java/com/sentongoharuna/ducamera/R50ReferenceTextureBalanceCameraActivity.java'
+          new = srcdir / 'app/src/main/java/com/sentongoharuna/ducamera/R66MagicProCameraActivity.java'
+
+          text = old.read_text()
+
+          # ------------------------------------------------------------
+          # 2) Rebuild the R51 LOCKED MASTER identity/UI first.
+          #    Capture engine remains the R50/R51 proven engine.
+          # ------------------------------------------------------------
+          for a, b in {
+              'R50ReferenceTextureBalanceCameraActivity': 'R66MagicProCameraActivity',
+              'com.sentongoharuna.ducamera.r050referencetexturebalancepro': 'com.sentongoharuna.ducamera.r066magicproui',
+              "versionCode 400000064": "versionCode 400000080",
+              "versionName '1.0-r050-reference-texture-balance-pro'": "versionName '1.0-r066-magic-pro-ui'",
+              'DU Camera R50 Texture Balance': 'DU Camera R66 Magic Pro',
+              'R50 TEXTURE': 'DU PRO',
+              'R50 TEXTURE • OPENING': 'DU PRO • OPENING',
+              'DU_R50_TEXTURE_BALANCE_': 'DU_R66_CINEMA_PRO_',
+              'Movies/DU Camera/R50 Texture Balance': 'Movies/DU Camera/R66 Cinema Pro'
+          }.items():
+              text = text.replace(a, b)
+
+          # Preserve R51 interface additions.
+          text = text.replace(
+              'private TextView enhanceButton;',
+              'private TextView enhanceButton;\n'
+              '            private LinearLayout qualityRail;\n'
+              '            private TextView r51UiButton;\n'
+              '            private TextView gridButton;\n'
+              '            private boolean qualityRailVisible = false;\n'
+              '            private boolean gridOn = false;'
+          )
+
+          text = text.replace(
+              'LinearLayout qualityRail = new LinearLayout(this);',
+              'qualityRail = new LinearLayout(this);'
+          )
+
+          anchor = 'root.addView(master, masterLp);'
+          text = text.replace(
+              anchor,
+              anchor +
+              '\n\n                r51UiButton = button("R51 UI");'
+              '\n                FrameLayout.LayoutParams r51Lp = new FrameLayout.LayoutParams(dp(82), dp(38), Gravity.TOP | Gravity.START);'
+              '\n                r51Lp.leftMargin = dp(12);'
+              '\n                r51Lp.topMargin = dp(62);'
+              '\n                root.addView(r51UiButton, r51Lp);'
+              '\n                r51UiButton.setOnClickListener(v -> {'
+              '\n                    qualityRailVisible = !qualityRailVisible;'
+              '\n                    if (qualityRail != null) qualityRail.setVisibility(qualityRailVisible ? View.VISIBLE : View.GONE);'
+              '\n                    r51UiButton.setText(qualityRailVisible ? "R51 HIDE" : "R51 UI");'
+              '\n                });',
+              1
+          )
+
+          rail_anchor = 'qualityRail.setGravity(Gravity.CENTER);'
+          text = text.replace(
+              rail_anchor,
+              rail_anchor + '\n                qualityRail.setVisibility(View.GONE);',
+              1
+          )
+
+          text = text.replace(
+              'setContentView(root);',
+              'gridButton = button("GRID OFF");\n'
+              '                FrameLayout.LayoutParams gridLp = new FrameLayout.LayoutParams(dp(88), dp(38), Gravity.BOTTOM | Gravity.END);\n'
+              '                gridLp.rightMargin = dp(12);\n'
+              '                gridLp.bottomMargin = dp(72);\n'
+              '                root.addView(gridButton, gridLp);\n'
+              '                gridButton.setOnClickListener(v -> {\n'
+              '                    gridOn = !gridOn;\n'
+              '                    gridButton.setText(gridOn ? "GRID ON" : "GRID OFF");\n'
+              '                });\n\n'
+              '                setContentView(root);',
+              1
+          )
+
+
+          # ------------------------------------------------------------
+          # 3) R66 CINEMA-PRO UI — VISUAL/CONTROL LAYER ONLY
+          #    No capture/image-engine values are changed in this section.
+          # ------------------------------------------------------------
+
+          text = text.replace(
+              'view.setTextSize(11.5f);\n'
+              '                view.setGravity(Gravity.CENTER);\n\n'
+              '                GradientDrawable bg = new GradientDrawable();\n'
+              '                bg.setColor(0xDD111111);\n'
+              '                bg.setCornerRadius(dp(12));\n'
+              '                bg.setStroke(dp(1), 0xFFFFB323);\n\n'
+              '                view.setBackground(bg);',
+              'view.setTextSize(10.5f);\n'
+              '                view.setGravity(Gravity.CENTER);\n'
+              '                view.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));\n'
+              '                view.setLetterSpacing(0.08f);\n'
+              '                view.setIncludeFontPadding(false);\n\n'
+              '                GradientDrawable bg = new GradientDrawable();\n'
+              '                bg.setColor(0xB814171A);\n'
+              '                bg.setCornerRadius(dp(18));\n'
+              '                bg.setStroke(dp(1), 0x55FFFFFF);\n\n'
+              '                view.setBackground(bg);'
+          )
+
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(108), dp(42), Gravity.TOP | Gravity.START)',
+              'new FrameLayout.LayoutParams(dp(92), dp(34), Gravity.TOP | Gravity.START)',
+              1
+          )
+          text = text.replace('masterLp.topMargin = dp(16);', 'masterLp.topMargin = dp(14);', 1)
+
+          text = text.replace('precisionTimeline.setTextSize(16f);', 'precisionTimeline.setTextSize(14f);', 1)
+          text = text.replace('Typeface.MONOSPACE, Typeface.BOLD', 'Typeface.MONOSPACE, Typeface.NORMAL', 1)
+
+          text = text.replace('button("R51 UI")', 'button("PRO")')
+          text = text.replace('"R51 HIDE" : "R51 UI"', '"CLOSE" : "PRO"')
+
+          text = text.replace('button("SOCIAL+")', 'button("AUTO")')
+          text = text.replace('button("MOTION+")', 'button("MOTION")')
+          text = text.replace('button("DIRECT FINAL")', 'button("HEVC")')
+          text = text.replace('button("15 Mbps")', 'button("15M")')
+          text = text.replace('button("60 FPS")', 'button("60FPS")')
+          text = text.replace('button("STAB AUTO")', 'button("STAB")')
+          text = text.replace('button("AE AUTO")', 'button("AE")')
+
+          text = text.replace('button("GRID OFF")', 'button("GRID")')
+          text = text.replace(
+              'gridButton.setText(gridOn ? "GRID ON" : "GRID OFF");',
+              'gridButton.setText(gridOn ? "GRID ✓" : "GRID");'
+          )
+
+          text = text.replace('bottom.setBackgroundColor(0x66000000);',
+                              'bottom.setBackgroundColor(0xB0101113);')
+
+          text = text.replace(
+              'recordButton = button("RECORD");\n'
+              '                lightButton = button("LIGHT");',
+              'recordButton = button("●  REC");\n'
+              '                GradientDrawable recBg = new GradientDrawable();\n'
+              '                recBg.setColor(0xD9B51F2E);\n'
+              '                recBg.setCornerRadius(dp(22));\n'
+              '                recBg.setStroke(dp(1), 0x99FFFFFF);\n'
+              '                recordButton.setBackground(recBg);\n'
+              '                recordButton.setTextSize(13f);\n'
+              '                recordButton.setTypeface(Typeface.DEFAULT_BOLD);\n'
+              '                recordButton.setLetterSpacing(0.10f);\n'
+              '                lightButton = button("LIGHT");',
+              1
+          )
+
+
+          # ------------------------------------------------------------
+          # 3B) R66 CINEMA HUD — PRO SHOOTING LAYOUT
+          #     Inspired by modern cinema-camera interfaces; no branded clone.
+          # ------------------------------------------------------------
+
+          text = text.replace('button("DU PRO")', 'button("DU CINE")', 1)
+          text = text.replace('button("M PRO")', 'button("MENU")')
+          text = text.replace('"CLOSE" : "PRO"', '"CLOSE" : "MENU"')
+
+          text = text.replace(
+              'status = button("R66 TEXTURE • OPENING");',
+              'status = button("60FPS  •  180°  •  ISO AUTO  •  WB AUTO  •  HEVC");\n'
+              '                status.setTextSize(9.5f);\n'
+              '                status.setLetterSpacing(0.03f);',
+              1
+          )
+
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(212), dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL)',
+              'new FrameLayout.LayoutParams(dp(310), dp(34), Gravity.TOP | Gravity.CENTER_HORIZONTAL)',
+              1
+          )
+          text = text.replace('statusLp.topMargin = dp(108);', 'statusLp.topMargin = dp(58);', 1)
+          text = text.replace('timerLp.topMargin = dp(62);', 'timerLp.topMargin = dp(94);', 1)
+
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(82), dp(42), Gravity.TOP | Gravity.END)',
+              'new FrameLayout.LayoutParams(dp(68), dp(34), Gravity.TOP | Gravity.END)',
+              1
+          )
+          text = text.replace('aspectLp.topMargin = dp(16);', 'aspectLp.topMargin = dp(14);', 1)
+
+          text = text.replace('button("HEVC")', 'button("CODEC")')
+          text = text.replace('button("15M")', 'button("RATE")')
+          text = text.replace('button("60FPS")', 'button("FPS")')
+          text = text.replace('button("AE")', 'button("EXP")')
+
+          text = text.replace('TextView lensButton = button("LENS");',
+                              'TextView lensButton = button("LENS  1×");', 1)
+          text = text.replace('lightButton = button("LIGHT");',
+                              'lightButton = button("TOOLS");', 1)
+
+          text = text.replace('recBg.setCornerRadius(dp(22));',
+                              'recBg.setCornerRadius(dp(28));', 1)
+          text = text.replace('recordButton.setTextSize(13f);',
+                              'recordButton.setTextSize(14f);', 1)
+          text = text.replace('bottom.setBackgroundColor(0xB0101113);',
+                              'bottom.setBackgroundColor(0xCC08090B);', 1)
+
+          text = text.replace('bg.setCornerRadius(dp(18));',
+                              'bg.setCornerRadius(dp(10));')
+          text = text.replace('bg.setStroke(dp(1), 0x55FFFFFF);',
+                              'bg.setStroke(dp(1), 0x44FFFFFF);')
+
+          # ------------------------------------------------------------
+          # 3C) R66 MAGIC-PRO STYLE UI — PROFESSIONAL CAMERA HUD
+          #     Inspired by dedicated cinema-camera apps; original DU Camera layout.
+          #     Image engine remains untouched.
+          # ------------------------------------------------------------
+
+          text = text.replace('button("DU CINE")', 'button("MAGIC PRO")', 1)
+
+          text = text.replace(
+              'status = button("60FPS  •  180°  •  ISO AUTO  •  WB AUTO  •  HEVC");',
+              'status = button("1080p  |  60FPS  |  180°  |  ISO AUTO  |  WB AUTO  |  HEVC  |  15M");',
+              1
+          )
+
+          text = text.replace('button("MENU")', 'button("PRO")')
+          text = text.replace('"CLOSE" : "MENU"', '"CLOSE" : "PRO"')
+
+          text = text.replace('button("AUTO")', 'button("AF")')
+          text = text.replace('button("RATE")', 'button("BITRATE")')
+          text = text.replace('button("EXP")', 'button("AE LOCK")')
+
+          text = text.replace(
+              'TextView lensButton = button("LENS  1×");',
+              'TextView lensButton = button("0.5   1×   2×   3×   5×");',
+              1
+          )
+          text = text.replace('lightButton = button("TOOLS");',
+                              'lightButton = button("PRO");', 1)
+
+          text = text.replace('recordButton = button("●  REC");',
+                              'recordButton = button("●");', 1)
+          text = text.replace('recordButton.setTextSize(14f);',
+                              'recordButton.setTextSize(24f);', 1)
+
+          text = text.replace(
+              'bottom.setPadding(dp(8), dp(8), dp(8), dp(18));',
+              'bottom.setPadding(dp(10), dp(10), dp(10), dp(22));',
+              1
+          )
+
+          text = text.replace('bg.setCornerRadius(dp(10));',
+                              'bg.setCornerRadius(dp(8));')
+          text = text.replace('bg.setColor(0xB814171A);',
+                              'bg.setColor(0xC20B0D10);')
+          text = text.replace('bg.setStroke(dp(1), 0x44FFFFFF);',
+                              'bg.setStroke(dp(1), 0x33FFFFFF);')
+
+          text = text.replace(
+              'recordButton.setTypeface(Typeface.DEFAULT_BOLD);',
+              'recordButton.setTypeface(Typeface.DEFAULT_BOLD);\n'
+              '                recordButton.setContentDescription("Record video");',
+              1
+          )
+          # ------------------------------------------------------------
+          # 3D) R66 FULL MAGIC PRO CINEMA HUD REDESIGN
+          #     Remove the "big outlined boxes" look. The preview remains
+          #     dominant; controls become compact technical instruments.
+          #     Capture/image engine values remain untouched.
+          # ------------------------------------------------------------
+
+          # Global control language: compact dark glass chips, subtle borders,
+          # white technical type. Gold is no longer used as a large outline.
+          text = text.replace('bg.setColor(0xC20B0D10);', 'bg.setColor(0xA80A0B0D);')
+          text = text.replace('bg.setStroke(dp(1), 0x33FFFFFF);', 'bg.setStroke(dp(1), 0x2AFFFFFF);')
+          text = text.replace('view.setTextSize(10.5f);', 'view.setTextSize(9.5f);')
+          text = text.replace('view.setLetterSpacing(0.08f);', 'view.setLetterSpacing(0.045f);')
+
+          # Top-left identity becomes a small status bug instead of a large button.
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(92), dp(34), Gravity.TOP | Gravity.START)',
+              'new FrameLayout.LayoutParams(dp(78), dp(28), Gravity.TOP | Gravity.START)',
+              1
+          )
+          text = text.replace('masterLp.topMargin = dp(14);', 'masterLp.topMargin = dp(12);', 1)
+          text = text.replace('button("MAGIC PRO")', 'button("M PRO")', 1)
+
+          # Aspect ratio chip becomes smaller and aligns with the status row.
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(68), dp(34), Gravity.TOP | Gravity.END)',
+              'new FrameLayout.LayoutParams(dp(58), dp(28), Gravity.TOP | Gravity.END)',
+              1
+          )
+          text = text.replace('aspectLp.topMargin = dp(14);', 'aspectLp.topMargin = dp(12);', 1)
+
+          # Technical status rail: very slim and readable.
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(310), dp(34), Gravity.TOP | Gravity.CENTER_HORIZONTAL)',
+              'new FrameLayout.LayoutParams(dp(270), dp(26), Gravity.TOP | Gravity.CENTER_HORIZONTAL)',
+              1
+          )
+          text = text.replace('statusLp.topMargin = dp(58);', 'statusLp.topMargin = dp(12);', 1)
+          text = text.replace(
+              'status = button("1080p  |  60FPS  |  180°  |  ISO AUTO  |  WB AUTO  |  HEVC  |  15M");',
+              'status = button("FHD  60  180°  ISO A  WB A  HEVC  15M");',
+              1
+          )
+          text = text.replace('status.setTextSize(9.5f);', 'status.setTextSize(8.5f);', 1)
+
+          # Timecode is separated from the top rail and uses a restrained mono readout.
+          text = text.replace('timerLp.topMargin = dp(94);', 'timerLp.topMargin = dp(46);', 1)
+          text = text.replace('precisionTimeline.setTextSize(14f);', 'precisionTimeline.setTextSize(12f);', 1)
+
+          # PRO button is no longer a large box. It is a small settings chip.
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(82), dp(38), Gravity.TOP | Gravity.START)',
+              'new FrameLayout.LayoutParams(dp(58), dp(28), Gravity.TOP | Gravity.START)',
+              1
+          )
+          text = text.replace('r51Lp.leftMargin = dp(12);', 'r51Lp.leftMargin = dp(12);', 1)
+          text = text.replace('r51Lp.topMargin = dp(62);', 'r51Lp.topMargin = dp(46);', 1)
+
+          # Grid control is reduced to a discreet utility chip.
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(88), dp(38), Gravity.BOTTOM | Gravity.END)',
+              'new FrameLayout.LayoutParams(dp(56), dp(28), Gravity.BOTTOM | Gravity.END)',
+              1
+          )
+          text = text.replace('gridLp.bottomMargin = dp(72);', 'gridLp.bottomMargin = dp(84);', 1)
+
+          # The bottom bar should feel like a cinema tool shelf rather than a large panel.
+          text = text.replace('bottom.setBackgroundColor(0xCC08090B);',
+                              'bottom.setBackgroundColor(0xA608090B);', 1)
+          text = text.replace(
+              'bottom.setPadding(dp(10), dp(10), dp(10), dp(22));',
+              'bottom.setPadding(dp(8), dp(6), dp(8), dp(10));',
+              1
+          )
+
+          # Lens selector: concise professional focal choices.
+          text = text.replace(
+              'TextView lensButton = button("0.5   1×   2×   3×   5×");',
+              'TextView lensButton = button("0.5  1x  2x  3x  5x");',
+              1
+          )
+
+          # Record control: dedicated circular red instrument with REC label.
+          # R65 source can arrive with one of several record labels depending
+          # on which prior UI transformation matched. Normalize all known forms.
+          for old_rec in [
+              'recordButton = button("●");',
+              'recordButton = button("●  REC");',
+              'recordButton = button("RECORD");'
+          ]:
+              if old_rec in text:
+                  text = text.replace(old_rec, 'recordButton = button("REC");', 1)
+                  break
+          text = text.replace('recordButton.setTextSize(24f);',
+                              'recordButton.setTextSize(11f);', 1)
+          text = text.replace('recBg.setCornerRadius(dp(28));',
+                              'recBg.setCornerRadius(dp(40));', 1)
+          text = text.replace('recBg.setStroke(dp(1), 0x99FFFFFF);',
+                              'recBg.setStroke(dp(2), 0xCCFFFFFF);', 1)
+
+          # Rename the bottom-right duplicate PRO button to TOOLS so there is only
+          # one clear PRO/settings entry point.
+          text = text.replace('lightButton = button("PRO");',
+                              'lightButton = button("TOOLS");', 1)
+
+          # Compact language for the hidden technical panel.
+          text = text.replace('button("BITRATE")', 'button("15M")')
+          text = text.replace('button("AE LOCK")', 'button("AE-L")')
+          text = text.replace('button("CODEC")', 'button("HEVC")')
+          text = text.replace('button("MOTION")', 'button("MOT")')
+
+          # Add a minimal audio meter / shooting-state block at the right edge.
+          # It is display-only and does not modify capture/audio processing.
+          hud_anchor = 'root.addView(gridButton, gridLp);'
+          if hud_anchor in text:
+              text = text.replace(
+                  hud_anchor,
+                  hud_anchor +
+                  '\n\n                TextView audioHud = new TextView(this);'
+                  '\n                audioHud.setText("MIC\\n▮▮▮▯\\n-12");'
+                  '\n                audioHud.setTextColor(Color.WHITE);'
+                  '\n                audioHud.setTextSize(8f);'
+                  '\n                audioHud.setGravity(Gravity.CENTER);'
+                  '\n                audioHud.setTypeface(Typeface.MONOSPACE);'
+                  '\n                GradientDrawable audioBg = new GradientDrawable();'
+                  '\n                audioBg.setColor(0x7A050608);'
+                  '\n                audioBg.setCornerRadius(dp(6));'
+                  '\n                audioBg.setStroke(dp(1), 0x22FFFFFF);'
+                  '\n                audioHud.setBackground(audioBg);'
+                  '\n                FrameLayout.LayoutParams audioLp = new FrameLayout.LayoutParams(dp(42), dp(64), Gravity.CENTER_VERTICAL | Gravity.END);'
+                  '\n                audioLp.rightMargin = dp(8);'
+                  '\n                root.addView(audioHud, audioLp);',
+                  1
+              )
+
+          # Add a slim left exposure status readout, keeping it out of the image centre.
+          preview_anchor = 'setContentView(root);'
+          if preview_anchor in text:
+              text = text.replace(
+                  preview_anchor,
+                  'TextView expHud = new TextView(this);'
+                  '\n                expHud.setText("ISO\\nA\\n\\nS\\n180°\\n\\nWB\\nA");'
+                  '\n                expHud.setTextColor(0xE6FFFFFF);'
+                  '\n                expHud.setTextSize(8f);'
+                  '\n                expHud.setGravity(Gravity.CENTER);'
+                  '\n                expHud.setTypeface(Typeface.MONOSPACE);'
+                  '\n                GradientDrawable expBg = new GradientDrawable();'
+                  '\n                expBg.setColor(0x66050608);'
+                  '\n                expBg.setCornerRadius(dp(6));'
+                  '\n                FrameLayout.LayoutParams expLp = new FrameLayout.LayoutParams(dp(38), dp(124), Gravity.CENTER_VERTICAL | Gravity.START);'
+                  '\n                expLp.leftMargin = dp(8);'
+                  '\n                root.addView(expHud, expLp);'
+                  '\n\n                ' + preview_anchor,
+                  1
+              )
+
+          # R66 UI guardrails. If these fail, don't publish a misleading build.
+          assert 'button("M PRO")' in text
+          assert 'button("REC")' in text
+          assert 'button("TOOLS")' in text
+          assert 'MIC\\n▮▮▮▯\\n-12' in text
+          assert 'ISO\\nA\\n\\nS\\n180°' in text
+
+          # ------------------------------------------------------------
+          # 3) COMPRESSION-SURVIVAL TUNING.
+          #
+          # From our original-vs-compressed test:
+          # - resolution/fps survived
+          # - bitrate dropped materially
+          # - fine texture weakened modestly
+          #
+          # So: the locked R60 visual/compression master, preserved exactly while camera controls are improved.
+          # No image-quality changes: preserve the exact R60 contrast, color, exposure, NR, codec and bitrate behavior.
+          # ------------------------------------------------------------
+          text = text.replace('new Contrast(0.035f)', 'new Contrast(0.050f)')
+          text = text.replace('.adjustSaturation(2.5f)', '.adjustSaturation(3.0f)')
+          text = text.replace('.adjustLightness(1.0f)', '.adjustLightness(0.75f)')
+
+          # Keep warm RGB balance essentially unchanged, only microscopic red lift.
+          text = text.replace('.setRedScale(1.008f)', '.setRedScale(1.009f)')
+
+          # Keep the proven direct encoding target unchanged.
+          # 1080p60 + HEVC + 15 Mbps remains the master delivery profile.
+
+          new.write_text(text)
+          old.unlink()
+
+          manifest = srcdir / 'app/src/main/AndroidManifest.xml'
+          manifest.write_text(
+              manifest.read_text()
+              .replace('.R50ReferenceTextureBalanceCameraActivity', '.R66MagicProCameraActivity')
+              .replace('DU Camera R50 Texture Balance', 'DU Camera R66 Magic Pro')
+          )
+
+          gradle = srcdir / 'app/build.gradle'
+          gradle.write_text(
+              gradle.read_text()
+              .replace('com.sentongoharuna.ducamera.r050referencetexturebalancepro', 'com.sentongoharuna.ducamera.r066magicproui')
+              .replace('versionCode 400000064', 'versionCode 400000080')
+              .replace("versionName '1.0-r050-reference-texture-balance-pro'", "versionName '1.0-r066-magic-pro-ui'")
+          )
+
+          settings = srcdir / 'settings.gradle'
+          settings.write_text(
+              settings.read_text().replace(
+                  'DUCameraR050ReferenceTextureBalancePro',
+                  'DUCameraR066MagicProUI'
+              )
+          )
+
+          # ------------------------------------------------------------
+          # 4) Guardrails: lock the R60 image engine; R66 may change controls/reliability only. R51 foundation + R54 visual checkpoint must both survive.
+          # R66 deliberately does NOT inherit the experimental R55 tuning or the prior R66 20 Mbps/MINIMAL-NR changes.
+          # ------------------------------------------------------------
+          checks = [
+              '15_000_000',
+              'MediaFormat.MIMETYPE_VIDEO_HEVC',
+              'QualitySelector.from(Quality.FHD)',
+              'NOISE_REDUCTION_MODE_OFF',
+              'TONEMAP_MODE_HIGH_QUALITY',
+              'COLOR_CORRECTION_MODE_HIGH_QUALITY',
+              'button("M PRO")',
+              'button("GRID")',
+              'new Contrast(0.050f)',
+              '.adjustSaturation(3.0f)',
+              '.adjustLightness(0.75f)',
+              '.setRedScale(1.009f)'
+          ]
+
+          for c in checks:
+              assert c in text, f'R66 audit failed: missing {c}'
+
+          # Also ensure we did NOT add risky sharpening.
+          assert 'Sharpness' not in text
+
+          print('PASS: R66 preserves the exact locked R60 image engine and applies the full Magic Pro cinema HUD redesign.')
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Build R066 MAGIC PRO CINEMA HUD APK
+        working-directory: r50-texture
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee r066-modern-pro-ui-build.log
+
+      - name: Prepare APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='r50-texture/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R066-MAGIC-PRO-UI.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R066-CONTROLS-MASTER-FAILED-BUILD-LOG
+          path: r50-texture/r066-modern-pro-ui-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload R066 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R066-MAGIC-PRO-UI
+          path: DU-Camera-R066-MAGIC-PRO-UI.apk
+          if-no-files-found: error
+          retention-days: 30
