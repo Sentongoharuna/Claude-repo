@@ -1,0 +1,367 @@
+# R128 — R60 LOCKED CAMERA ENGINE + CLEAN PROFESSIONAL UI
+# IMPORTANT:
+# - R60 capture/image pipeline values are locked.
+# - No changes to codec, bitrate, resolution, FPS, NR, tonemap,
+#   color correction, contrast, saturation, lightness or RGB tuning.
+# - This build changes UI/controls only.
+# - "MAGIC PRO" is intentionally not used in the visible UI.
+
+name: Build DU Camera R128 R60 Locked Engine Clean UI APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/R128-R60-LOCKED-ENGINE-CLEAN-UI.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build_r128:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate locked R60 engine and apply R128 clean UI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          base_wf = Path(
+              '.github/workflows/'
+              'BUILD-DU-CAMERA-R050-REFERENCE-TEXTURE-BALANCE-PRO.yml'
+          )
+
+          if not base_wf.exists():
+              raise SystemExit(
+                  'Missing proven source workflow: ' + str(base_wf)
+              )
+
+          wf = base_wf.read_text()
+
+          marker = (
+              '    - name: Create R047 Reference Rich Image Pro '
+              'from proven R45 quality master\n'
+          )
+          start = wf.index(marker)
+          runpos = wf.index('      run: |\n', start) + len('      run: |\n')
+          end = wf.index('\n    - name: Set up Java 17', runpos)
+
+          block = wf[runpos:end]
+          lines = []
+          for ln in block.splitlines():
+              lines.append(ln[8:] if ln.startswith('        ') else ln)
+
+          Path('/tmp/r50-create.sh').write_text('\n'.join(lines) + '\n')
+          subprocess.run(['bash', '/tmp/r50-create.sh'], check=True)
+
+          srcdir = Path('r50-texture')
+          old = srcdir / (
+              'app/src/main/java/com/sentongoharuna/ducamera/'
+              'R50ReferenceTextureBalanceCameraActivity.java'
+          )
+          new = srcdir / (
+              'app/src/main/java/com/sentongoharuna/ducamera/'
+              'R128R60LockedCameraActivity.java'
+          )
+
+          text = old.read_text()
+
+          replacements = {
+              'R50ReferenceTextureBalanceCameraActivity':
+                  'R128R60LockedCameraActivity',
+              'com.sentongoharuna.ducamera.r050referencetexturebalancepro':
+                  'com.sentongoharuna.ducamera.r128r60locked',
+              'versionCode 400000064':
+                  'versionCode 400000128',
+              "versionName '1.0-r050-reference-texture-balance-pro'":
+                  "versionName '1.0-r128-r60-locked-clean-ui'",
+              'DU Camera R50 Texture Balance':
+                  'DU Camera R128',
+              'R50 TEXTURE':
+                  'DU CAMERA',
+              'R50 TEXTURE • OPENING':
+                  'DU CAMERA • OPENING',
+              'DU_R50_TEXTURE_BALANCE_':
+                  'DU_R128_R60_LOCKED_',
+              'Movies/DU Camera/R50 Texture Balance':
+                  'Movies/DU Camera/R128'
+          }
+
+          for a, b in replacements.items():
+              text = text.replace(a, b)
+
+          # R60 locked image/capture tuning from supplied code.
+          text = text.replace('new Contrast(0.035f)', 'new Contrast(0.050f)')
+          text = text.replace('.adjustSaturation(2.5f)', '.adjustSaturation(3.0f)')
+          text = text.replace('.adjustLightness(1.0f)', '.adjustLightness(0.75f)')
+          text = text.replace('.setRedScale(1.008f)', '.setRedScale(1.009f)')
+
+          # Clean compact UI treatment only.
+          text = text.replace(
+              'view.setTextSize(11.5f);\n'
+              '                view.setGravity(Gravity.CENTER);\n\n'
+              '                GradientDrawable bg = new GradientDrawable();\n'
+              '                bg.setColor(0xDD111111);\n'
+              '                bg.setCornerRadius(dp(12));\n'
+              '                bg.setStroke(dp(1), 0xFFFFB323);\n\n'
+              '                view.setBackground(bg);',
+              'view.setTextSize(10.5f);\n'
+              '                view.setGravity(Gravity.CENTER);\n'
+              '                view.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));\n'
+              '                view.setLetterSpacing(0.05f);\n'
+              '                view.setIncludeFontPadding(false);\n\n'
+              '                GradientDrawable bg = new GradientDrawable();\n'
+              '                bg.setColor(0xC20B0D10);\n'
+              '                bg.setCornerRadius(dp(10));\n'
+              '                bg.setStroke(dp(1), 0x33FFFFFF);\n\n'
+              '                view.setBackground(bg);'
+          )
+
+          text = text.replace(
+              'status = button("DU CAMERA • OPENING");',
+              'status = button("1080p  |  60FPS  |  180°  |  ISO AUTO  |  WB AUTO  |  HEVC  |  15M");',
+              1
+          )
+
+          text = text.replace(
+              'new FrameLayout.LayoutParams(dp(212), dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL)',
+              'new FrameLayout.LayoutParams(dp(310), dp(34), Gravity.TOP | Gravity.CENTER_HORIZONTAL)',
+              1
+          )
+          text = text.replace('statusLp.topMargin = dp(108);', 'statusLp.topMargin = dp(58);', 1)
+
+          text = text.replace('button("SOCIAL+")', 'button("AF")')
+          text = text.replace('button("MOTION+")', 'button("MOTION")')
+          text = text.replace('button("DIRECT FINAL")', 'button("CODEC")')
+          text = text.replace('button("15 Mbps")', 'button("BITRATE")')
+          text = text.replace('button("60 FPS")', 'button("FPS")')
+          text = text.replace('button("STAB AUTO")', 'button("STAB")')
+          text = text.replace('button("AE AUTO")', 'button("AE LOCK")')
+
+          text = text.replace(
+              'TextView lensButton = button("LENS");',
+              'TextView lensButton = button("0.5   1×   2×   3×   5×");',
+              1
+          )
+
+          text = text.replace(
+              'recordButton = button("RECORD");\n'
+              '                lightButton = button("LIGHT");',
+              'recordButton = button("●");\n'
+              '                GradientDrawable recBg = new GradientDrawable();\n'
+              '                recBg.setColor(0xD9B51F2E);\n'
+              '                recBg.setCornerRadius(dp(28));\n'
+              '                recBg.setStroke(dp(1), 0x99FFFFFF);\n'
+              '                recordButton.setBackground(recBg);\n'
+              '                recordButton.setTextSize(24f);\n'
+              '                recordButton.setTypeface(Typeface.DEFAULT_BOLD);\n'
+              '                recordButton.setContentDescription("Record video");\n'
+              '                lightButton = button("PRO");',
+              1
+          )
+
+          text = text.replace(
+              'bottom.setBackgroundColor(0x66000000);',
+              'bottom.setBackgroundColor(0xCC08090B);',
+              1
+          )
+
+          # Side rails + Action button. Visual additions only.
+          anchor = 'setContentView(root);'
+          if anchor in text:
+              extra = '''
+                LinearLayout leftRail = new LinearLayout(this);
+                leftRail.setOrientation(LinearLayout.VERTICAL);
+                leftRail.setGravity(Gravity.CENTER);
+
+                String[] leftNames = {"ISO", "SHUT", "WB", "FOCUS", "EV", "LUT"};
+                for (String n : leftNames) {
+                    TextView v = button(n);
+                    LinearLayout.LayoutParams lp =
+                        new LinearLayout.LayoutParams(dp(76), dp(42));
+                    lp.setMargins(0, dp(4), 0, dp(4));
+                    leftRail.addView(v, lp);
+                }
+
+                FrameLayout.LayoutParams leftLp =
+                    new FrameLayout.LayoutParams(
+                        dp(82),
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.START | Gravity.CENTER_VERTICAL
+                    );
+                leftLp.leftMargin = dp(8);
+                root.addView(leftRail, leftLp);
+
+                LinearLayout rightRail = new LinearLayout(this);
+                rightRail.setOrientation(LinearLayout.VERTICAL);
+                rightRail.setGravity(Gravity.CENTER);
+
+                String[] rightNames = {"STAB", "GRID", "SCOPE"};
+                for (String n : rightNames) {
+                    TextView v = button(n);
+                    LinearLayout.LayoutParams lp =
+                        new LinearLayout.LayoutParams(dp(76), dp(42));
+                    lp.setMargins(0, dp(4), 0, dp(4));
+                    rightRail.addView(v, lp);
+                }
+
+                FrameLayout.LayoutParams rightLp =
+                    new FrameLayout.LayoutParams(
+                        dp(82),
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.END | Gravity.CENTER_VERTICAL
+                    );
+                rightLp.rightMargin = dp(8);
+                root.addView(rightRail, rightLp);
+
+                TextView actionButton = button("✦");
+                actionButton.setTextSize(18f);
+                GradientDrawable actionBg = new GradientDrawable();
+                actionBg.setShape(GradientDrawable.OVAL);
+                actionBg.setColor(0xD90E151C);
+                actionBg.setStroke(dp(1), 0xFF76C8FF);
+                actionButton.setBackground(actionBg);
+
+                FrameLayout.LayoutParams actionLp =
+                    new FrameLayout.LayoutParams(
+                        dp(42), dp(42),
+                        Gravity.START | Gravity.TOP
+                    );
+                actionLp.leftMargin = dp(10);
+                actionLp.topMargin = dp(72);
+                root.addView(actionButton, actionLp);
+
+'''
+              text = text.replace(anchor, extra + anchor, 1)
+
+          text = text.replace('"MAGIC PRO"', '"DU CAMERA"')
+
+          new.write_text(text)
+          old.unlink()
+
+          manifest = srcdir / 'app/src/main/AndroidManifest.xml'
+          manifest.write_text(
+              manifest.read_text()
+              .replace(
+                  '.R50ReferenceTextureBalanceCameraActivity',
+                  '.R128R60LockedCameraActivity'
+              )
+              .replace(
+                  'DU Camera R50 Texture Balance',
+                  'DU Camera R128'
+              )
+          )
+
+          gradle = srcdir / 'app/build.gradle'
+          gradle.write_text(
+              gradle.read_text()
+              .replace(
+                  'com.sentongoharuna.ducamera.r050referencetexturebalancepro',
+                  'com.sentongoharuna.ducamera.r128r60locked'
+              )
+              .replace(
+                  'versionCode 400000064',
+                  'versionCode 400000128'
+              )
+              .replace(
+                  "versionName '1.0-r050-reference-texture-balance-pro'",
+                  "versionName '1.0-r128-r60-locked-clean-ui'"
+              )
+          )
+
+          settings = srcdir / 'settings.gradle'
+          settings.write_text(
+              settings.read_text().replace(
+                  'DUCameraR050ReferenceTextureBalancePro',
+                  'DUCameraR128R60LockedCleanUI'
+              )
+          )
+
+          checks = [
+              '15_000_000',
+              'MediaFormat.MIMETYPE_VIDEO_HEVC',
+              'QualitySelector.from(Quality.FHD)',
+              'NOISE_REDUCTION_MODE_OFF',
+              'TONEMAP_MODE_HIGH_QUALITY',
+              'COLOR_CORRECTION_MODE_HIGH_QUALITY',
+              'new Contrast(0.050f)',
+              '.adjustSaturation(3.0f)',
+              '.adjustLightness(0.75f)',
+              '.setRedScale(1.009f)',
+              '"ISO"', '"SHUT"', '"WB"', '"FOCUS"', '"EV"', '"LUT"',
+              '"STAB"', '"GRID"', '"SCOPE"'
+          ]
+
+          for c in checks:
+              assert c in text, f'R128 audit failed: missing {c}'
+
+          assert 'Sharpness' not in text
+          assert '"MAGIC PRO"' not in text
+
+          print('PASS: R128 preserves supplied R60 image engine and changes UI only.')
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Build R128 APK
+        working-directory: r50-texture
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace \
+            2>&1 | tee r128-build.log
+
+      - name: Prepare APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='r50-texture/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='DU-Camera-R128-R60-LOCKED-CLEAN-UI.apk'
+          test -s "$APK"
+          cp "$APK" "$OUT"
+          ls -lh "$OUT"
+          sha256sum "$OUT"
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R128-FAILED-BUILD-LOG
+          path: r50-texture/r128-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload R128 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DU-Camera-R128-R60-LOCKED-CLEAN-UI
+          path: DU-Camera-R128-R60-LOCKED-CLEAN-UI.apk
+          if-no-files-found: error
+          retention-days: 30
