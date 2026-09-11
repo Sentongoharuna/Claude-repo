@@ -1,0 +1,393 @@
+name: Build Magic Pro R117 Pro Camera Architecture
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/R117-PRO-CAMERA-ARCHITECTURE-APK.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Recreate proven R116 engine project
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import yaml, pathlib, subprocess
+          src = pathlib.Path('.github/workflows/R116-PRODUCTION-CONTROL-CENTER-FIX3-APK.yml')
+          data = yaml.safe_load(src.read_text())
+          steps = data['jobs']['build']['steps']
+          run = None
+          for step in steps:
+              if step.get('name') == 'Create R116 Android project':
+                  run = step.get('run')
+                  break
+          if not run:
+              raise SystemExit('Could not locate the proven R116 project generator step')
+          pathlib.Path('/tmp/create_r116.sh').write_text(run)
+          subprocess.run(['bash','/tmp/create_r116.sh'], check=True)
+          PY
+
+      - name: Repair inherited R116 compile guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC='r116/app/src/main/java/com/sentongoharuna/ducamera/R116MagicProProductionControlActivity.java'
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('r116/app/src/main/java/com/sentongoharuna/ducamera/R116MagicProProductionControlActivity.java')
+          s=p.read_text()
+          if 'FileOutputStream' in s and 'import java.io.FileOutputStream;' not in s:
+              marker='import java.io.PrintWriter;'
+              if marker in s:
+                  s=s.replace(marker, marker+'\nimport java.io.FileOutputStream;',1)
+              else:
+                  s=s.replace('package com.sentongoharuna.ducamera;', 'package com.sentongoharuna.ducamera;\n\nimport java.io.FileOutputStream;',1)
+              p.write_text(s)
+          PY
+
+      - name: Install R117 full camera UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r116/app/src/main/java/com/sentongoharuna/ducamera/R117MagicProActivity.java <<'JAVA'
+          package com.sentongoharuna.ducamera;
+
+          import android.Manifest;
+          import android.content.ContentValues;
+          import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.graphics.Paint;
+          import android.graphics.Canvas;
+          import android.hardware.camera2.CaptureRequest;
+          import android.os.Bundle;
+          import android.provider.MediaStore;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.widget.Button;
+          import android.widget.FrameLayout;
+          import android.widget.HorizontalScrollView;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.SeekBar;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import androidx.activity.ComponentActivity;
+          import androidx.annotation.NonNull;
+          import androidx.camera.camera2.interop.Camera2CameraControl;
+          import androidx.camera.camera2.interop.CaptureRequestOptions;
+          import androidx.camera.core.Camera;
+          import androidx.camera.core.CameraControl;
+          import androidx.camera.core.CameraSelector;
+          import androidx.camera.core.FocusMeteringAction;
+          import androidx.camera.core.ImageCapture;
+          import androidx.camera.core.ImageCaptureException;
+          import androidx.camera.core.MeteringPoint;
+          import androidx.camera.core.Preview;
+          import androidx.camera.core.ZoomState;
+          import androidx.camera.lifecycle.ProcessCameraProvider;
+          import androidx.camera.video.MediaStoreOutputOptions;
+          import androidx.camera.video.PendingRecording;
+          import androidx.camera.video.Quality;
+          import androidx.camera.video.QualitySelector;
+          import androidx.camera.video.Recorder;
+          import androidx.camera.video.Recording;
+          import androidx.camera.video.VideoCapture;
+          import androidx.camera.video.VideoRecordEvent;
+          import androidx.camera.view.PreviewView;
+          import androidx.core.app.ActivityCompat;
+          import androidx.core.content.ContextCompat;
+          import androidx.lifecycle.LiveData;
+
+          import com.google.common.util.concurrent.ListenableFuture;
+
+          import java.text.SimpleDateFormat;
+          import java.util.Date;
+          import java.util.Locale;
+          import java.util.concurrent.ExecutionException;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+          import java.util.concurrent.TimeUnit;
+
+          public class R117MagicProActivity extends ComponentActivity {
+              private static final int REQ = 117;
+              private FrameLayout root, cameraStage, panelHost;
+              private PreviewView previewView;
+              private GridOverlay gridOverlay;
+              private LinearLayout leftRail, rightRail, bottomTray;
+              private TextView modeTitle, statusText, timerText, exposureValue;
+              private Button recordButton;
+              private ProcessCameraProvider provider;
+              private Camera camera;
+              private CameraSelector selector = CameraSelector.DEFAULT_BACK_CAMERA;
+              private VideoCapture<Recorder> videoCapture;
+              private ImageCapture imageCapture;
+              private Recording recording;
+              private ExecutorService executor;
+              private boolean gridOn = false, hudMinimal = false, torchOn = false;
+              private int currentIso = 200;
+              private long currentShutterNs = 16666667L;
+              private int evIndex = 0;
+              private long recordStart = 0;
+              private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+
+              @Override protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  getWindow().setStatusBarColor(Color.BLACK);
+                  getWindow().setNavigationBarColor(Color.BLACK);
+                  executor = Executors.newSingleThreadExecutor();
+                  buildUi();
+                  if (hasPermissions()) startCamera(); else ActivityCompat.requestPermissions(this,
+                          new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO}, REQ);
+              }
+
+              private boolean hasPermissions() {
+                  return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              @Override public void onRequestPermissionsResult(int r, @NonNull String[] p, @NonNull int[] g) {
+                  super.onRequestPermissionsResult(r,p,g);
+                  if (r == REQ && hasPermissions()) startCamera();
+              }
+
+              private TextView label(String t, int sp) {
+                  TextView v = new TextView(this); v.setText(t); v.setTextColor(Color.WHITE); v.setTextSize(sp);
+                  v.setGravity(Gravity.CENTER_VERTICAL); v.setPadding(dp(10),dp(6),dp(10),dp(6)); return v;
+              }
+
+              private Button button(String t) {
+                  Button b = new Button(this); b.setText(t); b.setTextColor(Color.WHITE); b.setTextSize(11);
+                  b.setAllCaps(false); b.setMinHeight(dp(42)); b.setMinimumHeight(dp(42));
+                  b.setBackgroundColor(Color.rgb(24,27,32));
+                  return b;
+              }
+
+              private void buildUi() {
+                  root = new FrameLayout(this); root.setBackgroundColor(Color.BLACK); setContentView(root);
+                  cameraStage = new FrameLayout(this); root.addView(cameraStage, new FrameLayout.LayoutParams(-1,-1));
+                  previewView = new PreviewView(this); previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+                  cameraStage.addView(previewView, new FrameLayout.LayoutParams(-1,-1));
+                  gridOverlay = new GridOverlay(); gridOverlay.setVisibility(View.GONE); cameraStage.addView(gridOverlay,new FrameLayout.LayoutParams(-1,-1));
+
+                  LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.VERTICAL); top.setPadding(dp(10),dp(8),dp(10),0);
+                  top.setBackgroundColor(Color.argb(185,5,7,10));
+                  FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-1,dp(92),Gravity.TOP); root.addView(top,tp);
+                  LinearLayout topLine = new LinearLayout(this); topLine.setGravity(Gravity.CENTER_VERTICAL); top.addView(topLine,new LinearLayout.LayoutParams(-1,dp(44)));
+                  modeTitle = label("MAGIC PRO · LIVE",15); modeTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                  topLine.addView(modeTitle,new LinearLayout.LayoutParams(0,-1,1));
+                  statusText = label("FHD 60 · HEVC · READY",11); topLine.addView(statusText);
+                  Button gear = button("SETTINGS"); gear.setOnClickListener(v->openSettings()); topLine.addView(gear,new LinearLayout.LayoutParams(dp(104),dp(40)));
+
+                  HorizontalScrollView navScroll = new HorizontalScrollView(this); navScroll.setHorizontalScrollBarEnabled(false); top.addView(navScroll,new LinearLayout.LayoutParams(-1,dp(42)));
+                  LinearLayout nav = new LinearLayout(this); navScroll.addView(nav);
+                  addNav(nav,"LIVE",()->setMode("LIVE")); addNav(nav,"PRO",()->setMode("PRO")); addNav(nav,"CINEMA",()->setMode("CINEMA")); addNav(nav,"TOOLS",()->setMode("TOOLS")); addNav(nav,"SETTINGS",this::openSettings);
+
+                  leftRail = new LinearLayout(this); leftRail.setOrientation(LinearLayout.VERTICAL); leftRail.setPadding(dp(8),dp(6),dp(4),dp(6)); leftRail.setBackgroundColor(Color.argb(115,0,0,0));
+                  FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(104),-2,Gravity.START|Gravity.CENTER_VERTICAL); root.addView(leftRail,lp);
+                  addQuick(leftRail,"ISO",()->openIso()); addQuick(leftRail,"SHUTTER",()->openShutter()); addQuick(leftRail,"WB",()->openCategory("WHITE BALANCE & COLOUR")); addQuick(leftRail,"FOCUS",()->openCategory("FOCUS")); addQuick(leftRail,"EV",()->openEv()); addQuick(leftRail,"LUT",()->openCategory("LUTS & CINEMA LOOKS"));
+
+                  rightRail = new LinearLayout(this); rightRail.setOrientation(LinearLayout.VERTICAL); rightRail.setPadding(dp(4),dp(6),dp(8),dp(6)); rightRail.setBackgroundColor(Color.argb(115,0,0,0));
+                  FrameLayout.LayoutParams rp = new FrameLayout.LayoutParams(dp(104),-2,Gravity.END|Gravity.CENTER_VERTICAL); root.addView(rightRail,rp);
+                  addQuick(rightRail,"1× ZOOM",()->openZoom()); addQuick(rightRail,"AF / TRACK",()->openCategory("TRACKING & DETECTION")); addQuick(rightRail,"STAB",()->openCategory("STABILIZATION & MOTION")); addQuick(rightRail,"SCOPES",()->openCategory("SCOPES & EXPOSURE ASSIST")); addQuick(rightRail,"GRID",this::toggleGrid); addQuick(rightRail,"TORCH",this::toggleTorch);
+
+                  timerText = label("00:00:00",18); timerText.setGravity(Gravity.CENTER); timerText.setTypeface(android.graphics.Typeface.MONOSPACE,1);
+                  FrameLayout.LayoutParams tim = new FrameLayout.LayoutParams(dp(150),dp(44),Gravity.TOP|Gravity.CENTER_HORIZONTAL); tim.topMargin=dp(102); root.addView(timerText,tim);
+
+                  bottomTray = new LinearLayout(this); bottomTray.setGravity(Gravity.CENTER); bottomTray.setPadding(dp(10),dp(8),dp(10),dp(12)); bottomTray.setBackgroundColor(Color.argb(220,5,7,10));
+                  FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(-1,dp(112),Gravity.BOTTOM); root.addView(bottomTray,bp);
+                  Button gallery=button("GALLERY"); gallery.setOnClickListener(v->toast("Open recordings from your Gallery")); bottomTray.addView(gallery,new LinearLayout.LayoutParams(0,dp(54),1));
+                  Button photo=button("PHOTO"); photo.setOnClickListener(v->takePhoto()); bottomTray.addView(photo,new LinearLayout.LayoutParams(0,dp(54),1));
+                  recordButton=button("●  REC"); recordButton.setTextSize(17); recordButton.setBackgroundColor(Color.rgb(165,28,35)); recordButton.setOnClickListener(v->toggleRecord());
+                  LinearLayout.LayoutParams recp=new LinearLayout.LayoutParams(dp(120),dp(72)); recp.setMargins(dp(10),0,dp(10),0); bottomTray.addView(recordButton,recp);
+                  Button flip=button("FLIP"); flip.setOnClickListener(v->flipCamera()); bottomTray.addView(flip,new LinearLayout.LayoutParams(0,dp(54),1));
+                  Button hud=button("HUD"); hud.setOnClickListener(v->toggleHud()); bottomTray.addView(hud,new LinearLayout.LayoutParams(0,dp(54),1));
+
+                  exposureValue = label("",12); exposureValue.setGravity(Gravity.CENTER);
+                  FrameLayout.LayoutParams ep = new FrameLayout.LayoutParams(dp(260),dp(42),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL); ep.bottomMargin=dp(118); root.addView(exposureValue,ep);
+
+                  panelHost = new FrameLayout(this); panelHost.setBackgroundColor(Color.argb(245,8,10,13)); panelHost.setVisibility(View.GONE); root.addView(panelHost,new FrameLayout.LayoutParams(-1,-1));
+
+                  previewView.setOnTouchListener((v,e)-> { if(e.getAction()==MotionEvent.ACTION_UP && camera!=null){ MeteringPoint p=previewView.getMeteringPointFactory().createPoint(e.getX(),e.getY()); FocusMeteringAction a=new FocusMeteringAction.Builder(p,FocusMeteringAction.FLAG_AF|FocusMeteringAction.FLAG_AE).setAutoCancelDuration(3, TimeUnit.SECONDS).build(); camera.getCameraControl().startFocusAndMetering(a); toast("Focus / exposure set"); } return true; });
+              }
+
+              private void addNav(LinearLayout n,String t,Runnable r){ Button b=button(t); b.setOnClickListener(v->r.run()); LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(96),dp(38)); p.setMargins(dp(2),0,dp(2),0); n.addView(b,p); }
+              private void addQuick(LinearLayout p,String t,Runnable r){ Button b=button(t); b.setOnClickListener(v->r.run()); LinearLayout.LayoutParams q=new LinearLayout.LayoutParams(-1,dp(46)); q.setMargins(0,dp(2),0,dp(2)); p.addView(b,q); }
+              private void setMode(String m){ modeTitle.setText("MAGIC PRO · "+m); if(m.equals("SETTINGS")){openSettings(); return;} if(m.equals("CINEMA")) openCategory("LUTS & CINEMA LOOKS"); else if(m.equals("TOOLS")) openTools(); else { closePanel(); boolean pro=m.equals("PRO"); leftRail.setVisibility(pro?View.VISIBLE:View.GONE); rightRail.setVisibility(View.VISIBLE); } }
+
+              private void startCamera(){
+                  ListenableFuture<ProcessCameraProvider> f=ProcessCameraProvider.getInstance(this);
+                  f.addListener(()->{ try{ provider=f.get(); bindCamera(); }catch(ExecutionException|InterruptedException e){ toast("Camera start failed: "+e.getMessage()); } },ContextCompat.getMainExecutor(this));
+              }
+              private void bindCamera(){
+                  if(provider==null)return; provider.unbindAll();
+                  Preview preview=new Preview.Builder().build(); preview.setSurfaceProvider(previewView.getSurfaceProvider());
+                  Recorder recorder=new Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.FHD)).build();
+                  videoCapture=VideoCapture.withOutput(recorder); imageCapture=new ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build();
+                  camera=provider.bindToLifecycle(this,selector,preview,videoCapture,imageCapture);
+                  statusText.setText("FHD · HEVC/DEVICE · READY");
+              }
+
+              private void toggleRecord(){
+                  if(recording!=null){ recording.stop(); return; }
+                  if(videoCapture==null){toast("Camera is not ready");return;}
+                  String name="MagicPro_R117_"+new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date());
+                  ContentValues cv=new ContentValues(); cv.put(MediaStore.Video.Media.DISPLAY_NAME,name); cv.put(MediaStore.Video.Media.MIME_TYPE,"video/mp4");
+                  if(android.os.Build.VERSION.SDK_INT>=29) cv.put(MediaStore.Video.Media.RELATIVE_PATH,"Movies/MagicPro");
+                  MediaStoreOutputOptions out=new MediaStoreOutputOptions.Builder(getContentResolver(),MediaStore.Video.Media.EXTERNAL_CONTENT_URI).setContentValues(cv).build();
+                  PendingRecording pending=videoCapture.getOutput().prepareRecording(this,out);
+                  if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED) pending=pending.withAudioEnabled();
+                  recording=pending.start(ContextCompat.getMainExecutor(this),event->{
+                      if(event instanceof VideoRecordEvent.Start){ recordStart=System.currentTimeMillis(); recordButton.setText("■ STOP"); statusText.setText("● RECORDING"); tickTimer(); }
+                      if(event instanceof VideoRecordEvent.Finalize){ VideoRecordEvent.Finalize fin=(VideoRecordEvent.Finalize)event; recording=null; recordButton.setText("●  REC"); statusText.setText(fin.hasError()?"RECORD ERROR":"SAVED"); timerText.setText("00:00:00"); }
+                  });
+              }
+              private void tickTimer(){ if(recording==null)return; long s=(System.currentTimeMillis()-recordStart)/1000; timerText.setText(String.format(Locale.US,"%02d:%02d:%02d",s/3600,(s/60)%60,s%60)); handler.postDelayed(this::tickTimer,500); }
+
+              private void takePhoto(){
+                  if(imageCapture==null)return; String name="MagicPro_R117_"+System.currentTimeMillis(); ContentValues cv=new ContentValues(); cv.put(MediaStore.Images.Media.DISPLAY_NAME,name); cv.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg"); if(android.os.Build.VERSION.SDK_INT>=29)cv.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/MagicPro");
+                  ImageCapture.OutputFileOptions o=new ImageCapture.OutputFileOptions.Builder(getContentResolver(),MediaStore.Images.Media.EXTERNAL_CONTENT_URI,cv).build();
+                  imageCapture.takePicture(o,executor,new ImageCapture.OnImageSavedCallback(){ public void onImageSaved(@NonNull ImageCapture.OutputFileResults r){runOnUiThread(()->toast("Photo saved"));} public void onError(@NonNull ImageCaptureException e){runOnUiThread(()->toast("Photo failed"));} });
+              }
+
+              private void flipCamera(){ selector = selector==CameraSelector.DEFAULT_BACK_CAMERA?CameraSelector.DEFAULT_FRONT_CAMERA:CameraSelector.DEFAULT_BACK_CAMERA; bindCamera(); }
+              private void toggleGrid(){ gridOn=!gridOn; gridOverlay.setVisibility(gridOn?View.VISIBLE:View.GONE); }
+              private void toggleTorch(){ if(camera==null)return; torchOn=!torchOn; camera.getCameraControl().enableTorch(torchOn); }
+              private void toggleHud(){ hudMinimal=!hudMinimal; leftRail.setVisibility(hudMinimal?View.GONE:View.VISIBLE); rightRail.setVisibility(hudMinimal?View.GONE:View.VISIBLE); topVisibility(!hudMinimal); }
+              private void topVisibility(boolean show){ modeTitle.setAlpha(show?1f:.35f); statusText.setAlpha(show?1f:.35f); }
+
+              private void openZoom(){ if(camera==null)return; openSlider("ZOOM",0,100,0,p->{ LiveData<ZoomState> z=camera.getCameraInfo().getZoomState(); ZoomState zs=z.getValue(); if(zs!=null){ float min=zs.getMinZoomRatio(), max=zs.getMaxZoomRatio(); float ratio=min+(max-min)*(p/100f); camera.getCameraControl().setZoomRatio(ratio); exposureValue.setText(String.format(Locale.US,"ZOOM %.1f×",ratio)); }}); }
+              private void openEv(){ if(camera==null)return; int min=camera.getCameraInfo().getExposureState().getExposureCompensationRange().getLower(); int max=camera.getCameraInfo().getExposureState().getExposureCompensationRange().getUpper(); openSlider("EXPOSURE COMPENSATION",min,max,evIndex,p->{evIndex=p; camera.getCameraControl().setExposureCompensationIndex(p); exposureValue.setText("EV "+p);}); }
+              private void openIso(){ openSlider("MANUAL ISO",100,3200,currentIso,p->{currentIso=Math.max(100,p); applyManualExposure(); exposureValue.setText("ISO "+currentIso);}); }
+              private void openShutter(){ openSlider("SHUTTER 1/x",24,1000,60,p->{int d=Math.max(24,p); currentShutterNs=1_000_000_000L/d; applyManualExposure(); exposureValue.setText("SHUTTER 1/"+d);}); }
+              private void applyManualExposure(){ if(camera==null)return; try{ Camera2CameraControl c=Camera2CameraControl.from(camera.getCameraControl()); CaptureRequestOptions opts=new CaptureRequestOptions.Builder().setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE,CaptureRequest.CONTROL_AE_MODE_OFF).setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY,currentIso).setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME,currentShutterNs).build(); c.setCaptureRequestOptions(opts); }catch(Throwable t){toast("Manual exposure is not supported by this lens");} }
+
+              interface SlideAction{void set(int p);} private void openSlider(String title,int min,int max,int progress,SlideAction action){
+                  panelHost.removeAllViews(); panelHost.setVisibility(View.VISIBLE); LinearLayout box=new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(dp(18),dp(28),dp(18),dp(18)); panelHost.addView(box,new FrameLayout.LayoutParams(-1,-1));
+                  LinearLayout head=new LinearLayout(this); TextView h=label(title,20); h.setTypeface(android.graphics.Typeface.DEFAULT_BOLD); head.addView(h,new LinearLayout.LayoutParams(0,dp(54),1)); Button x=button("DONE"); x.setOnClickListener(v->closePanel()); head.addView(x,new LinearLayout.LayoutParams(dp(90),dp(46))); box.addView(head);
+                  TextView val=label(String.valueOf(progress),28); val.setGravity(Gravity.CENTER); box.addView(val,new LinearLayout.LayoutParams(-1,dp(72)));
+                  SeekBar s=new SeekBar(this); s.setMax(max-min); s.setProgress(Math.max(0,Math.min(max-min,progress-min))); box.addView(s,new LinearLayout.LayoutParams(-1,dp(72))); s.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar b,int p,boolean f){int v=min+p;val.setText(String.valueOf(v));action.set(v);} public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){}});
+              }
+
+              private void openSettings(){ openCategory("SETTINGS HOME"); }
+              private void openTools(){ openCategory("TOOLS HOME"); }
+              private void openCategory(String selected){
+                  panelHost.removeAllViews(); panelHost.setVisibility(View.VISIBLE);
+                  LinearLayout main=new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL); main.setPadding(dp(12),dp(18),dp(12),dp(16)); panelHost.addView(main,new FrameLayout.LayoutParams(-1,-1));
+                  LinearLayout head=new LinearLayout(this); TextView title=label(selected,20); title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD); head.addView(title,new LinearLayout.LayoutParams(0,dp(54),1)); Button close=button("CAMERA"); close.setOnClickListener(v->closePanel()); head.addView(close,new LinearLayout.LayoutParams(dp(100),dp(46))); main.addView(head);
+                  ScrollView sv=new ScrollView(this); LinearLayout body=new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); sv.addView(body); main.addView(sv,new LinearLayout.LayoutParams(-1,0,1));
+                  String[] cats={"CAMERA & LENS","VIDEO RECORDING","PHOTO","EXPOSURE","FOCUS","TRACKING & DETECTION","WHITE BALANCE & COLOUR","LUTS & CINEMA LOOKS","IMAGE TUNING","VIDEO ENHANCEMENT","STABILIZATION & MOTION","COMPOSITION & GUIDES","SCOPES & EXPOSURE ASSIST","AUDIO & MICROPHONE","ENCODER & QUALITY","LIVE / REPORTER CAMERA","STREAMING & NETWORK","TAGS & METADATA","GPS & LOCATION","HUD & DISPLAY","STORAGE & MEDIA","DEVICE & SYSTEM STATUS","SPECIAL SHOOTING MODES","ADVANCED / DEVICE CAPABILITIES"};
+                  for(String c:cats){ Button b=button(c); b.setGravity(Gravity.START|Gravity.CENTER_VERTICAL); b.setPadding(dp(16),0,dp(10),0); b.setOnClickListener(v->showCategoryDetail(c)); LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(54)); p.setMargins(0,dp(3),0,dp(3)); body.addView(b,p); }
+              }
+
+              private void showCategoryDetail(String c){
+                  panelHost.removeAllViews(); panelHost.setVisibility(View.VISIBLE); LinearLayout main=new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL); main.setPadding(dp(14),dp(18),dp(14),dp(16)); panelHost.addView(main,new FrameLayout.LayoutParams(-1,-1));
+                  LinearLayout head=new LinearLayout(this); TextView t=label(c,19); t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD); head.addView(t,new LinearLayout.LayoutParams(0,dp(56),1)); Button back=button("BACK"); back.setOnClickListener(v->openSettings()); head.addView(back,new LinearLayout.LayoutParams(dp(90),dp(46))); main.addView(head);
+                  ScrollView sv=new ScrollView(this); LinearLayout b=new LinearLayout(this); b.setOrientation(LinearLayout.VERTICAL); sv.addView(b); main.addView(sv,new LinearLayout.LayoutParams(-1,0,1));
+                  if(c.equals("CAMERA & LENS")){ control(b,"Flip front / rear",this::flipCamera); control(b,"Zoom control",this::openZoom); control(b,"Touch focus","Tap anywhere on the live viewfinder to meter focus and exposure."); }
+                  else if(c.equals("VIDEO RECORDING")){ control(b,"Start / stop recording",this::toggleRecord); info(b,"FHD default recording · audio when permission is granted · MediaStore saving"); }
+                  else if(c.equals("PHOTO")){ control(b,"Capture photo",this::takePhoto); }
+                  else if(c.equals("EXPOSURE")){ control(b,"ISO",this::openIso); control(b,"Shutter",this::openShutter); control(b,"EV",this::openEv); }
+                  else if(c.equals("LUTS & CINEMA LOOKS")){ String[] looks={"Castle Hill","After Midnight","Blue Heron","Black Emerald","Ebony Keys","Casper","Diamond Stud","Coco's Black","Alpine Salamander","Electric Slide"}; for(String l:looks)control(b,l,()->{exposureValue.setText("LOOK · "+l);closePanel();}); info(b,"Look selection is organized here. The inherited R116 engine remains in the project for its existing processing functions while R117 replaces the shooting interface."); }
+                  else if(c.equals("COMPOSITION & GUIDES")){ control(b,"Grid",this::toggleGrid); control(b,"Minimal HUD",this::toggleHud); }
+                  else if(c.equals("HUD & DISPLAY")){ control(b,"Minimal / Full HUD",this::toggleHud); control(b,"Grid overlay",this::toggleGrid); }
+                  else if(c.equals("STABILIZATION & MOTION")){ info(b,"Device-supported stabilization is kept as a dedicated category so controls never overlap the viewfinder."); }
+                  else if(c.equals("SCOPES & EXPOSURE ASSIST")){ info(b,"Histogram · waveform · zebra · clipping · false colour · peaking are grouped here as monitoring tools."); }
+                  else if(c.equals("FOCUS")){ info(b,"Touch AF/AE is active on the viewfinder. AF-C, AF-S and manual-focus controls are grouped here for device capability handling."); }
+                  else if(c.equals("TRACKING & DETECTION")){ info(b,"Face detection · subject tracking · touch tracking · tracking lock."); }
+                  else if(c.equals("WHITE BALANCE & COLOUR")){ info(b,"Auto WB · manual WB · temperature · tint · RGB balance."); }
+                  else if(c.equals("IMAGE TUNING")){ info(b,"Contrast · saturation · brightness · temperature · tint · red/green/blue balance."); }
+                  else if(c.equals("VIDEO ENHANCEMENT")){ info(b,"Saved-video enhancement and Media3 processing are kept separate from shooting controls."); }
+                  else if(c.equals("AUDIO & MICROPHONE")){ info(b,"Mic source · gain · L/R meters · monitoring · audio format · mute."); }
+                  else if(c.equals("ENCODER & QUALITY")){ info(b,"H.264 / HEVC · bitrate · FPS · FHD/4K capability · encoder status."); }
+                  else if(c.equals("LIVE / REPORTER CAMERA")){ control(b,"Return to clean LIVE camera",()->{closePanel();setMode("LIVE");}); info(b,"Reporter/event mode · fast record · optional tags."); }
+                  else if(c.equals("STREAMING & NETWORK")){ info(b,"Network status · Wi-Fi awareness · streaming connection settings."); }
+                  else if(c.equals("TAGS & METADATA")){ info(b,"GPS · date/time · device · camera ID · motion · optional video tags."); }
+                  else if(c.equals("GPS & LOCATION")){ info(b,"Location permission · GNSS status · coordinates · location metadata."); }
+                  else if(c.equals("STORAGE & MEDIA")){ info(b,"Videos save to Movies/MagicPro and photos to Pictures/MagicPro on supported Android versions."); }
+                  else if(c.equals("DEVICE & SYSTEM STATUS")){ info(b,"Battery · storage · network · camera · orientation · recording health."); }
+                  else if(c.equals("SPECIAL SHOOTING MODES")){ info(b,"Video · Photo · Slow Motion · Cinema · Time-Lapse · Reporter/Event."); }
+                  else if(c.equals("ADVANCED / DEVICE CAPABILITIES")){ info(b,"Camera2 capabilities · sensor/lens data · supported FPS/resolutions · HDR · encoders · performance."); }
+              }
+              private void control(LinearLayout p,String text,Runnable r){Button b=button(text);b.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);b.setPadding(dp(16),0,dp(10),0);b.setOnClickListener(v->r.run());LinearLayout.LayoutParams q=new LinearLayout.LayoutParams(-1,dp(54));q.setMargins(0,dp(3),0,dp(3));p.addView(b,q);}
+              private void control(LinearLayout p,String text,String msg){control(p,text,()->toast(msg));}
+              private void info(LinearLayout p,String msg){TextView t=label(msg,13);t.setTextColor(Color.LTGRAY);t.setPadding(dp(14),dp(14),dp(14),dp(14));p.addView(t,new LinearLayout.LayoutParams(-1,-2));}
+              private void closePanel(){panelHost.setVisibility(View.GONE);}
+              private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
+              private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
+
+              @Override protected void onDestroy(){ super.onDestroy(); if(recording!=null)recording.stop(); if(executor!=null)executor.shutdown(); }
+
+              private class GridOverlay extends View {
+                  private final Paint p=new Paint(1); GridOverlay(){super(R117MagicProActivity.this);p.setColor(Color.argb(120,255,255,255));p.setStrokeWidth(dp(1));setClickable(false);} @Override protected void onDraw(Canvas c){super.onDraw(c);float w=getWidth(),h=getHeight();c.drawLine(w/3,0,w/3,h,p);c.drawLine(w*2/3,0,w*2/3,h,p);c.drawLine(0,h/3,w,h/3,p);c.drawLine(0,h*2/3,w,h*2/3,p);}
+              }
+          }
+          JAVA
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('r116/app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          s=s.replace('android:label="Magic Pro R116 Production Control Center"','android:label="Magic Pro R117"')
+          s=s.replace('android:name=".R116MagicProProductionControlActivity"','android:name=".R117MagicProActivity"')
+          p.write_text(s)
+          g=Path('r116/app/build.gradle')
+          s=g.read_text().replace("versionCode 400000116","versionCode 400000117").replace("versionName '1.0-r116-production-control-center-fix2'","versionName '1.0-r117-pro-camera-architecture'")
+          g.write_text(s)
+          PY
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build R117 APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd r116
+          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee ../r117-build.log
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R117-FAILED-BUILD-LOG
+          path: r117-build.log
+
+      - name: Collect APK
+        if: success()
+        shell: bash
+        run: |
+          mkdir -p out
+          cp r116/app/build/outputs/apk/debug/app-debug.apk out/Magic-Pro-R117-Pro-Camera.apk
+
+      - name: Upload R117 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Magic-Pro-R117-Pro-Camera-APK
+          path: out/Magic-Pro-R117-Pro-Camera.apk
