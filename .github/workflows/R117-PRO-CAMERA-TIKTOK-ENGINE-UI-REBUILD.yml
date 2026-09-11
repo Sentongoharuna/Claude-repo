@@ -1,0 +1,752 @@
+name: Build Magic Pro R117 TikTok Engine UI Rebuild
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/R117-PRO-CAMERA-TIKTOK-ENGINE-UI-REBUILD.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install YAML parser
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Recreate exact tested R116 engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          import yaml
+
+          source = Path(".github/workflows/R116-PRODUCTION-CONTROL-CENTER-FIX3-APK.yml")
+          if not source.exists():
+              raise SystemExit("Missing R116 FIX3 tested-engine workflow")
+
+          wf = yaml.safe_load(source.read_text(encoding="utf-8"))
+          step = next((s for s in wf["jobs"]["build"]["steps"]
+                       if s.get("name") == "Create R116 Android project"), None)
+          if not step or not step.get("run"):
+              raise SystemExit("R116 project generator not found")
+
+          Path("/tmp/r116-engine.sh").write_text(step["run"], encoding="utf-8")
+          print("Using the exact R116 project generator as the R117 engine foundation.")
+          PY
+
+          bash /tmp/r116-engine.sh
+          test -f r116/app/src/main/java/com/sentongoharuna/ducamera/R116MagicProProductionControlActivity.java
+
+      - name: Rebuild only the presentation layer as R117
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          java = Path("r116/app/src/main/java/com/sentongoharuna/ducamera/R116MagicProProductionControlActivity.java")
+          manifest = Path("r116/app/src/main/AndroidManifest.xml")
+          gradle = Path("r116/app/build.gradle")
+          src = java.read_text(encoding="utf-8")
+
+          # Known R116 FIX3 compilation repair. No engine behavior is changed.
+          if "import java.io.FileOutputStream;" not in src:
+              anchor = "import java.io.PrintWriter;"
+              if anchor in src:
+                  src = src.replace(anchor, anchor + "\nimport java.io.FileOutputStream;", 1)
+              else:
+                  p = src.find("\n", src.find("package "))
+                  src = src[:p+1] + "import java.io.FileOutputStream;\n" + src[p+1:]
+
+          def method_end(text, method_name):
+              m = re.search(r'\bvoid\s+' + re.escape(method_name) + r'\s*\([^)]*\)\s*\{', text)
+              if not m:
+                  return None
+              start = text.find("{", m.start())
+              depth = 0
+              mode = "code"
+              i = start
+              while i < len(text):
+                  c = text[i]
+                  n = text[i+1] if i + 1 < len(text) else ""
+                  if mode == "code":
+                      if c == '"': mode = "str"
+                      elif c == "'": mode = "chr"
+                      elif c == "/" and n == "/": mode = "line"; i += 1
+                      elif c == "/" and n == "*": mode = "block"; i += 1
+                      elif c == "{": depth += 1
+                      elif c == "}":
+                          depth -= 1
+                          if depth == 0: return i
+                  elif mode == "str":
+                      if c == "\\": i += 1
+                      elif c == '"': mode = "code"
+                  elif mode == "chr":
+                      if c == "\\": i += 1
+                      elif c == "'": mode = "code"
+                  elif mode == "line":
+                      if c == "\n": mode = "code"
+                  elif mode == "block":
+                      if c == "*" and n == "/": mode = "code"; i += 1
+                  i += 1
+              return None
+
+          # Install R117 after the existing R116 initialization has completed.
+          if "r117InstallOrganizedCameraUi();" not in src:
+              end = method_end(src, "onCreate")
+              if end is None:
+                  raise SystemExit("Could not safely locate onCreate()")
+              call = '''
+                  new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                          () -> r117InstallOrganizedCameraUi(), 450L);
+              '''
+              src = src[:end] + call + src[end:]
+
+          if "private void r117InstallOrganizedCameraUi()" not in src:
+              helper = r'''
+          // ================================================================
+          // MAGIC PRO R117 — ORGANIZED UI OVER THE TESTED R116 ENGINE
+          // ================================================================
+          private final java.util.ArrayList<android.view.View> r117Legacy =
+                  new java.util.ArrayList<>();
+          private android.widget.FrameLayout r117Shell;
+          private android.widget.ScrollView r117Sheet;
+          private android.widget.LinearLayout r117SheetBody;
+          private android.widget.TextView r117Mode;
+
+          private int r117Dp(float n) {
+              return Math.round(n * getResources().getDisplayMetrics().density);
+          }
+
+          private android.graphics.drawable.GradientDrawable r117Background(
+                  int fill, float radius, int stroke, int strokeWidth) {
+              android.graphics.drawable.GradientDrawable g =
+                      new android.graphics.drawable.GradientDrawable();
+              g.setColor(fill);
+              g.setCornerRadius(r117Dp(radius));
+              if (strokeWidth > 0) g.setStroke(r117Dp(strokeWidth), stroke);
+              return g;
+          }
+
+          private android.widget.TextView r117Label(String text, float sp) {
+              android.widget.TextView v = new android.widget.TextView(this);
+              v.setText(text);
+              v.setTextColor(android.graphics.Color.WHITE);
+              v.setTextSize(sp);
+              v.setGravity(android.view.Gravity.CENTER);
+              v.setPadding(r117Dp(8), r117Dp(8), r117Dp(8), r117Dp(8));
+              v.setMinHeight(r117Dp(44));
+              return v;
+          }
+
+          private String r117Norm(String s) {
+              return s == null ? "" :
+                      s.toUpperCase(java.util.Locale.US).replace("\n", " ")
+                       .replaceAll("\\s+", " ").trim();
+          }
+
+          private void r117Collect(android.view.View v) {
+              if (v == null) return;
+              if (v instanceof android.widget.TextView && v.hasOnClickListeners()) {
+                  CharSequence t = ((android.widget.TextView) v).getText();
+                  if (t != null && t.length() > 0) r117Legacy.add(v);
+              }
+              if (v instanceof android.view.ViewGroup) {
+                  android.view.ViewGroup g = (android.view.ViewGroup) v;
+                  for (int i = 0; i < g.getChildCount(); i++) r117Collect(g.getChildAt(i));
+              }
+          }
+
+          private androidx.camera.view.PreviewView r117Preview(android.view.View v) {
+              if (v instanceof androidx.camera.view.PreviewView)
+                  return (androidx.camera.view.PreviewView) v;
+              if (v instanceof android.view.ViewGroup) {
+                  android.view.ViewGroup g = (android.view.ViewGroup) v;
+                  for (int i = 0; i < g.getChildCount(); i++) {
+                      androidx.camera.view.PreviewView p = r117Preview(g.getChildAt(i));
+                      if (p != null) return p;
+                  }
+              }
+              return null;
+          }
+
+          private boolean r117Matches(android.view.View v, String... keys) {
+              if (!(v instanceof android.widget.TextView) || !v.hasOnClickListeners()) return false;
+              String text = r117Norm(((android.widget.TextView) v).getText().toString());
+              for (String key : keys) {
+                  String k = r117Norm(key);
+                  if (!k.isEmpty() && (text.equals(k) || text.startsWith(k + " ") || text.contains(k)))
+                      return true;
+              }
+              return false;
+          }
+
+          private boolean r117Has(String... keys) {
+              for (android.view.View v : r117Legacy) if (r117Matches(v, keys)) return true;
+              return false;
+          }
+
+          private boolean r117Click(String... keys) {
+              java.util.ArrayList<android.view.View> matches = new java.util.ArrayList<>();
+              for (android.view.View v : r117Legacy) if (r117Matches(v, keys)) matches.add(v);
+              java.util.Collections.sort(matches, (a, b) ->
+                      Integer.compare(((android.widget.TextView)a).getText().length(),
+                                      ((android.widget.TextView)b).getText().length()));
+              for (android.view.View v : matches) if (v.performClick()) return true;
+              return false;
+          }
+
+          private android.widget.TextView r117Action(String label, String... keys) {
+              if (!r117Has(keys)) return null; // no fake unsupported controls
+              android.widget.TextView b = r117Label(label, 11f);
+              b.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+              b.setBackground(r117Background(0xD91A2028, 11, 0x66586575, 1));
+              b.setOnClickListener(v -> {
+                  if (!r117Click(keys)) android.widget.Toast.makeText(
+                          this, label + " unavailable", android.widget.Toast.LENGTH_SHORT).show();
+              });
+              return b;
+          }
+
+          private android.widget.LinearLayout r117Row() {
+              android.widget.LinearLayout r = new android.widget.LinearLayout(this);
+              r.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+              r.setGravity(android.view.Gravity.CENTER);
+              return r;
+          }
+
+          private void r117Put(android.widget.LinearLayout row, String label, String... keys) {
+              android.widget.TextView b = r117Action(label, keys);
+              if (b == null) return;
+              android.widget.LinearLayout.LayoutParams lp =
+                      new android.widget.LinearLayout.LayoutParams(0, r117Dp(46), 1f);
+              lp.setMargins(r117Dp(3), r117Dp(3), r117Dp(3), r117Dp(3));
+              row.addView(b, lp);
+          }
+
+          private void r117Section(String title) {
+              android.widget.TextView h = r117Label(title, 11f);
+              h.setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
+              h.setTextColor(0xFFAFC5DB);
+              h.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+              android.widget.LinearLayout.LayoutParams p =
+                      new android.widget.LinearLayout.LayoutParams(
+                              android.view.ViewGroup.LayoutParams.MATCH_PARENT, r117Dp(38));
+              p.topMargin = r117Dp(5);
+              r117SheetBody.addView(h, p);
+          }
+
+          private void r117AddRow(Object[][] items) {
+              android.widget.LinearLayout row = r117Row();
+              for (Object[] item : items) {
+                  String label = (String)item[0];
+                  String[] keys = (String[])item[1];
+                  r117Put(row, label, keys);
+              }
+              if (row.getChildCount() > 0) r117SheetBody.addView(row);
+          }
+
+          private void r117CloseButton() {
+              android.widget.TextView c = r117Label("CLOSE PANEL", 11f);
+              c.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+              c.setBackground(r117Background(0xEE252C35, 11, 0x66798798, 1));
+              c.setOnClickListener(v -> r117Sheet.setVisibility(android.view.View.GONE));
+              android.widget.LinearLayout.LayoutParams p =
+                      new android.widget.LinearLayout.LayoutParams(
+                              android.view.ViewGroup.LayoutParams.MATCH_PARENT, r117Dp(48));
+              p.setMargins(0, r117Dp(10), 0, r117Dp(4));
+              r117SheetBody.addView(c, p);
+          }
+
+          private void r117Show(String page) {
+              if (r117SheetBody == null) return;
+              r117SheetBody.removeAllViews();
+              r117Mode.setText(page);
+
+              if ("LIVE".equals(page)) {
+                  r117Section("LIVE / REPORTER");
+                  r117AddRow(new Object[][]{
+                          {"Record", new String[]{"START LIVE RECORD","RECORD","REC"}},
+                          {"Photo", new String[]{"PHOTO","SNAP"}},
+                          {"Flip", new String[]{"FLIP","CAMERA"}},
+                          {"Zoom", new String[]{"ZOOM"}}
+                  });
+                  r117AddRow(new Object[][]{
+                          {"LUT", new String[]{"LUT"}},
+                          {"Mic", new String[]{"MIC"}},
+                          {"Tags", new String[]{"TAGS","TAG"}},
+                          {"Light", new String[]{"TORCH","FLASH","LIGHT"}}
+                  });
+                  r117AddRow(new Object[][]{
+                          {"Timer", new String[]{"TIMER"}},
+                          {"Grid", new String[]{"GRID"}},
+                          {"Stab", new String[]{"STAB","STABIL"}},
+                          {"GPS", new String[]{"GPS","LOCATION"}}
+                  });
+              } else if ("PRO".equals(page)) {
+                  r117Section("EXPOSURE");
+                  r117AddRow(new Object[][]{
+                          {"ISO", new String[]{"ISO"}},
+                          {"Shutter", new String[]{"SHUTTER"}},
+                          {"EV", new String[]{"EV"}},
+                          {"AE Lock", new String[]{"AE LOCK","AEL"}}
+                  });
+                  r117Section("FOCUS & TRACKING");
+                  r117AddRow(new Object[][]{
+                          {"Focus", new String[]{"FOCUS"}},
+                          {"AF", new String[]{"AF"}},
+                          {"Track", new String[]{"TRACK"}},
+                          {"Face", new String[]{"FACE"}}
+                  });
+                  r117Section("COLOUR & LENS");
+                  r117AddRow(new Object[][]{
+                          {"WB", new String[]{"WB","WHITE BALANCE"}},
+                          {"LUT", new String[]{"LUT"}},
+                          {"Zoom", new String[]{"ZOOM"}},
+                          {"Flip", new String[]{"FLIP","CAMERA"}}
+                  });
+                  r117Section("RECORDING");
+                  r117AddRow(new Object[][]{
+                          {"FPS", new String[]{"FPS"}},
+                          {"Codec", new String[]{"CODEC","HEVC","H.264"}},
+                          {"Bitrate", new String[]{"BITRATE","MBPS"}},
+                          {"HDR", new String[]{"HDR"}}
+                  });
+              } else if ("CINEMA".equals(page)) {
+                  r117Section("LUTS & CINEMA LOOKS");
+                  r117AddRow(new Object[][]{
+                          {"LUT", new String[]{"LUT"}},
+                          {"Looks", new String[]{"LOOKS","IMAGE & LUT"}},
+                          {"Intensity", new String[]{"INTENSITY"}},
+                          {"HDR", new String[]{"HDR"}}
+                  });
+                  r117Section("IMAGE TUNING");
+                  r117AddRow(new Object[][]{
+                          {"Contrast", new String[]{"CONTRAST"}},
+                          {"Saturation", new String[]{"SATURATION"}},
+                          {"Lightness", new String[]{"LIGHTNESS","BRIGHTNESS"}},
+                          {"Temp", new String[]{"TEMPERATURE","TEMP"}}
+                  });
+                  r117AddRow(new Object[][]{
+                          {"Tint", new String[]{"TINT"}},
+                          {"Red", new String[]{"RED"}},
+                          {"Green", new String[]{"GREEN"}},
+                          {"Blue", new String[]{"BLUE"}}
+                  });
+                  r117Section("CINEMA OUTPUT");
+                  r117AddRow(new Object[][]{
+                          {"Codec", new String[]{"CODEC","HEVC","H.264"}},
+                          {"Bitrate", new String[]{"BITRATE","MBPS"}},
+                          {"FPS", new String[]{"FPS"}},
+                          {"Stab", new String[]{"STAB","STABIL"}}
+                  });
+              } else if ("TOOLS".equals(page)) {
+                  r117Section("MONITORING & SCOPES");
+                  r117AddRow(new Object[][]{
+                          {"Scopes", new String[]{"SCOPES","SCOPE"}},
+                          {"Histogram", new String[]{"HISTOGRAM"}},
+                          {"Waveform", new String[]{"WAVEFORM"}},
+                          {"Zebra", new String[]{"ZEBRA"}}
+                  });
+                  r117AddRow(new Object[][]{
+                          {"Peaking", new String[]{"PEAKING","PEAK"}},
+                          {"Grid", new String[]{"GRID"}},
+                          {"Level", new String[]{"LEVEL"}},
+                          {"HUD", new String[]{"HUD"}}
+                  });
+                  r117Section("MOTION & REPORTER TOOLS");
+                  r117AddRow(new Object[][]{
+                          {"Stab", new String[]{"STAB","STABIL"}},
+                          {"Track", new String[]{"TRACK"}},
+                          {"Face", new String[]{"FACE"}},
+                          {"Timer", new String[]{"TIMER"}}
+                  });
+                  r117AddRow(new Object[][]{
+                          {"GPS", new String[]{"GPS","LOCATION"}},
+                          {"Tags", new String[]{"TAGS","TAG"}},
+                          {"Mic", new String[]{"MIC"}},
+                          {"Network", new String[]{"NETWORK","STREAM"}}
+                  });
+              } else {
+                  // SETTINGS: all major families kept in one scrollable control center.
+                  r117Section("CAMERA & LENS");
+                  r117AddRow(new Object[][]{
+                          {"Camera", new String[]{"CAMERA"}},
+                          {"Lens", new String[]{"LENS"}},
+                          {"Zoom", new String[]{"ZOOM"}},
+                          {"Aspect", new String[]{"ASPECT"}}
+                  });
+                  r117Section("VIDEO RECORDING");
+                  r117AddRow(new Object[][]{
+                          {"Resolution", new String[]{"RESOLUTION","FHD","4K"}},
+                          {"FPS", new String[]{"FPS"}},
+                          {"Codec", new String[]{"CODEC","HEVC","H.264"}},
+                          {"Bitrate", new String[]{"BITRATE","MBPS"}}
+                  });
+                  r117Section("EXPOSURE");
+                  r117AddRow(new Object[][]{
+                          {"ISO", new String[]{"ISO"}},
+                          {"Shutter", new String[]{"SHUTTER"}},
+                          {"EV", new String[]{"EV"}},
+                          {"AE", new String[]{"AE ","AUTO EXP"}}
+                  });
+                  r117Section("FOCUS & TRACKING");
+                  r117AddRow(new Object[][]{
+                          {"Focus", new String[]{"FOCUS"}},
+                          {"AF", new String[]{"AF"}},
+                          {"Tracking", new String[]{"TRACK"}},
+                          {"Face", new String[]{"FACE"}}
+                  });
+                  r117Section("WHITE BALANCE & COLOUR");
+                  r117AddRow(new Object[][]{
+                          {"WB", new String[]{"WB","WHITE BALANCE"}},
+                          {"Temp", new String[]{"TEMPERATURE","TEMP"}},
+                          {"Tint", new String[]{"TINT"}},
+                          {"LUT", new String[]{"LUT"}}
+                  });
+                  r117Section("IMAGE & LUT");
+                  r117AddRow(new Object[][]{
+                          {"Looks", new String[]{"LOOKS","IMAGE & LUT"}},
+                          {"Intensity", new String[]{"INTENSITY"}},
+                          {"Contrast", new String[]{"CONTRAST"}},
+                          {"Saturation", new String[]{"SATURATION"}}
+                  });
+                  r117Section("AUDIO & MICROPHONE");
+                  r117AddRow(new Object[][]{
+                          {"Mic", new String[]{"MIC"}},
+                          {"Gain", new String[]{"GAIN"}},
+                          {"Monitor", new String[]{"MONITOR"}},
+                          {"Audio", new String[]{"AUDIO"}}
+                  });
+                  r117Section("STABILIZATION & MOTION");
+                  r117AddRow(new Object[][]{
+                          {"Stabilization", new String[]{"STAB","STABIL"}},
+                          {"Level", new String[]{"LEVEL"}},
+                          {"Motion", new String[]{"MOTION"}},
+                          {"Orientation", new String[]{"ORIENTATION"}}
+                  });
+                  r117Section("COMPOSITION & GUIDES");
+                  r117AddRow(new Object[][]{
+                          {"Grid", new String[]{"GRID"}},
+                          {"Guides", new String[]{"GUIDE"}},
+                          {"Center", new String[]{"CENTER","CENTRE"}},
+                          {"Safe Area", new String[]{"SAFE"}}
+                  });
+                  r117Section("SCOPES & EXPOSURE ASSIST");
+                  r117AddRow(new Object[][]{
+                          {"Scopes", new String[]{"SCOPES","SCOPE"}},
+                          {"Zebra", new String[]{"ZEBRA"}},
+                          {"Histogram", new String[]{"HISTOGRAM"}},
+                          {"Peaking", new String[]{"PEAKING","PEAK"}}
+                  });
+                  r117Section("LIVE / REPORTER");
+                  r117AddRow(new Object[][]{
+                          {"Live", new String[]{"LIVE"}},
+                          {"Reporter", new String[]{"REPORTER"}},
+                          {"Event", new String[]{"EVENT"}},
+                          {"Tags", new String[]{"TAGS","TAG"}}
+                  });
+                  r117Section("GPS & METADATA");
+                  r117AddRow(new Object[][]{
+                          {"GPS", new String[]{"GPS","LOCATION"}},
+                          {"Metadata", new String[]{"METADATA"}},
+                          {"Date/Time", new String[]{"DATE","TIME"}},
+                          {"Device", new String[]{"DEVICE"}}
+                  });
+                  r117Section("STORAGE & MEDIA");
+                  r117AddRow(new Object[][]{
+                          {"Storage", new String[]{"STORAGE"}},
+                          {"Gallery", new String[]{"GALLERY"}},
+                          {"Files", new String[]{"FILES"}},
+                          {"Save", new String[]{"SAVE"}}
+                  });
+                  r117Section("HUD & DISPLAY");
+                  r117AddRow(new Object[][]{
+                          {"HUD", new String[]{"HUD"}},
+                          {"Display", new String[]{"DISPLAY"}},
+                          {"Brightness", new String[]{"BRIGHTNESS"}},
+                          {"Clean View", new String[]{"CLEAN"}}
+                  });
+                  r117Section("STREAMING & NETWORK");
+                  r117AddRow(new Object[][]{
+                          {"Stream", new String[]{"STREAM"}},
+                          {"Network", new String[]{"NETWORK"}},
+                          {"Wi-Fi", new String[]{"WI-FI","WIFI"}},
+                          {"Server", new String[]{"SERVER"}}
+                  });
+                  r117Section("DEVICE & ADVANCED");
+                  r117AddRow(new Object[][]{
+                          {"Capabilities", new String[]{"CAPABIL"}},
+                          {"Encoder", new String[]{"ENCODER"}},
+                          {"Performance", new String[]{"PERFORMANCE"}},
+                          {"Reset", new String[]{"RESET"}}
+                  });
+              }
+
+              r117CloseButton();
+              r117Sheet.setVisibility(android.view.View.VISIBLE);
+          }
+
+          private android.widget.TextView r117Nav(String text, String page) {
+              android.widget.TextView b = r117Label(text, 10.5f);
+              b.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+              b.setBackground(r117Background(0xD90C1016, 10, 0x44586878, 1));
+              b.setOnClickListener(v -> r117Show(page));
+              return b;
+          }
+
+          private void r117InstallOrganizedCameraUi() {
+              if (r117Shell != null) return;
+              android.widget.FrameLayout content =
+                      (android.widget.FrameLayout)findViewById(android.R.id.content);
+              if (content == null || content.getChildCount() == 0) return;
+
+              r117Legacy.clear();
+              r117Collect(content);
+
+              // Keep the already-bound PreviewView. Camera/encoder logic stays untouched.
+              androidx.camera.view.PreviewView preview = r117Preview(content);
+              if (preview != null) {
+                  android.view.ViewParent par = preview.getParent();
+                  if (par instanceof android.view.ViewGroup)
+                      ((android.view.ViewGroup)par).removeView(preview);
+                  content.removeAllViews();
+                  content.addView(preview, new android.widget.FrameLayout.LayoutParams(
+                          android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                          android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+              }
+
+              r117Shell = new android.widget.FrameLayout(this);
+              content.addView(r117Shell, new android.widget.FrameLayout.LayoutParams(
+                      android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                      android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+
+              // Top status strip.
+              android.widget.LinearLayout top = new android.widget.LinearLayout(this);
+              top.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+              top.setGravity(android.view.Gravity.CENTER_VERTICAL);
+              top.setPadding(r117Dp(12), 0, r117Dp(8), 0);
+              top.setBackground(r117Background(0xC4070A0F, 0, 0, 0));
+
+              android.widget.TextView brand = r117Label("MAGIC PRO", 13f);
+              brand.setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
+              brand.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+              top.addView(brand, new android.widget.LinearLayout.LayoutParams(
+                      0, android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+
+              r117Mode = r117Label("PRO", 10.5f);
+              r117Mode.setTextColor(0xFFB6C8DB);
+              top.addView(r117Mode);
+
+              android.widget.TextView settings = r117Label("SETTINGS", 10f);
+              settings.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+              settings.setOnClickListener(v -> r117Show("SETTINGS"));
+              top.addView(settings);
+
+              android.widget.FrameLayout.LayoutParams topP =
+                      new android.widget.FrameLayout.LayoutParams(
+                              android.view.ViewGroup.LayoutParams.MATCH_PARENT, r117Dp(52),
+                              android.view.Gravity.TOP);
+              r117Shell.addView(top, topP);
+
+              // Left exposure rail — only real existing controls are shown.
+              android.widget.LinearLayout left = new android.widget.LinearLayout(this);
+              left.setOrientation(android.widget.LinearLayout.VERTICAL);
+              left.setGravity(android.view.Gravity.CENTER);
+              String[][] leftData = {
+                      {"ISO","ISO"}, {"SHUT","SHUTTER"}, {"WB","WB"},
+                      {"FOCUS","FOCUS"}, {"EV","EV"}, {"LUT","LUT"}
+              };
+              for (String[] x : leftData) {
+                  android.widget.TextView b = r117Action(x[0], x[1]);
+                  if (b != null) {
+                      android.widget.LinearLayout.LayoutParams p =
+                              new android.widget.LinearLayout.LayoutParams(r117Dp(58), r117Dp(42));
+                      p.setMargins(0, r117Dp(3), 0, r117Dp(3));
+                      left.addView(b, p);
+                  }
+              }
+              android.widget.FrameLayout.LayoutParams leftP =
+                      new android.widget.FrameLayout.LayoutParams(
+                              r117Dp(62), android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                              android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
+              leftP.leftMargin = r117Dp(7);
+              r117Shell.addView(left, leftP);
+
+              // Right monitoring rail.
+              android.widget.LinearLayout right = new android.widget.LinearLayout(this);
+              right.setOrientation(android.widget.LinearLayout.VERTICAL);
+              right.setGravity(android.view.Gravity.CENTER);
+              String[][] rightData = {
+                      {"ZOOM","ZOOM"}, {"STAB","STAB"}, {"GRID","GRID"},
+                      {"SCOPE","SCOPES"}, {"MIC","MIC"}
+              };
+              for (String[] x : rightData) {
+                  android.widget.TextView b = r117Action(x[0], x[1]);
+                  if (b != null) {
+                      android.widget.LinearLayout.LayoutParams p =
+                              new android.widget.LinearLayout.LayoutParams(r117Dp(58), r117Dp(42));
+                      p.setMargins(0, r117Dp(3), 0, r117Dp(3));
+                      right.addView(b, p);
+                  }
+              }
+              android.widget.FrameLayout.LayoutParams rightP =
+                      new android.widget.FrameLayout.LayoutParams(
+                              r117Dp(62), android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                              android.view.Gravity.END | android.view.Gravity.CENTER_VERTICAL);
+              rightP.rightMargin = r117Dp(7);
+              r117Shell.addView(right, rightP);
+
+              // Main record button forwards to the tested legacy recording action.
+              android.widget.TextView rec = r117Label("REC", 14f);
+              rec.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+              rec.setBackground(r117Background(0xECB51D2B, 40, 0xDDFFFFFF, 2));
+              rec.setOnClickListener(v -> {
+                  if (!r117Click("START LIVE RECORD","RECORD","REC"))
+                      android.widget.Toast.makeText(this, "Record control unavailable",
+                              android.widget.Toast.LENGTH_SHORT).show();
+              });
+              android.widget.FrameLayout.LayoutParams recP =
+                      new android.widget.FrameLayout.LayoutParams(r117Dp(72), r117Dp(72),
+                              android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL);
+              recP.bottomMargin = r117Dp(76);
+              r117Shell.addView(rec, recP);
+
+              // Main five-part architecture.
+              android.widget.LinearLayout nav = new android.widget.LinearLayout(this);
+              nav.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+              nav.setGravity(android.view.Gravity.CENTER);
+              nav.setPadding(r117Dp(5), r117Dp(4), r117Dp(5), r117Dp(4));
+              nav.setBackground(r117Background(0xF2070A0F, 0, 0, 0));
+              String[][] tabs = {
+                      {"LIVE","LIVE"}, {"PRO","PRO"}, {"CINEMA","CINEMA"},
+                      {"TOOLS","TOOLS"}, {"SETTINGS","SETTINGS"}
+              };
+              for (String[] tab : tabs) {
+                  android.widget.TextView b = r117Nav(tab[0], tab[1]);
+                  android.widget.LinearLayout.LayoutParams p =
+                          new android.widget.LinearLayout.LayoutParams(0, r117Dp(50), 1f);
+                  p.setMargins(r117Dp(2), 0, r117Dp(2), 0);
+                  nav.addView(b, p);
+              }
+              r117Shell.addView(nav, new android.widget.FrameLayout.LayoutParams(
+                      android.view.ViewGroup.LayoutParams.MATCH_PARENT, r117Dp(60),
+                      android.view.Gravity.BOTTOM));
+
+              // One scrollable panel replaces clipped/overlapping permanent panels.
+              r117Sheet = new android.widget.ScrollView(this);
+              r117Sheet.setFillViewport(false);
+              r117Sheet.setVisibility(android.view.View.GONE);
+              r117Sheet.setBackground(r117Background(0xF20A0E14, 18, 0x665C6979, 1));
+
+              r117SheetBody = new android.widget.LinearLayout(this);
+              r117SheetBody.setOrientation(android.widget.LinearLayout.VERTICAL);
+              r117SheetBody.setPadding(r117Dp(10), r117Dp(8), r117Dp(10), r117Dp(12));
+              r117Sheet.addView(r117SheetBody,
+                      new android.widget.ScrollView.LayoutParams(
+                              android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                              android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
+
+              android.widget.FrameLayout.LayoutParams sheetP =
+                      new android.widget.FrameLayout.LayoutParams(
+                              android.view.ViewGroup.LayoutParams.MATCH_PARENT, r117Dp(430),
+                              android.view.Gravity.BOTTOM);
+              sheetP.leftMargin = r117Dp(8);
+              sheetP.rightMargin = r117Dp(8);
+              sheetP.bottomMargin = r117Dp(64);
+              r117Shell.addView(r117Sheet, sheetP);
+          }
+          '''
+              last = src.rfind("}")
+              if last < 0:
+                  raise SystemExit("Class end not found")
+              src = src[:last] + "\n" + helper + "\n" + src[last:]
+
+          java.write_text(src, encoding="utf-8")
+
+          # R117 identity, while keeping applicationId/package for upgrade continuity.
+          m = manifest.read_text(encoding="utf-8")
+          m = m.replace("Magic Pro R116 Production Control Center", "Magic Pro R117 Pro Camera")
+          manifest.write_text(m, encoding="utf-8")
+
+          g = gradle.read_text(encoding="utf-8")
+          g = re.sub(r"versionCode\s+\d+", "versionCode 400000117", g, count=1)
+          g = re.sub(r"versionName\s+'[^']+'",
+                     "versionName '1.0-r117-pro-camera-tiktok-engine'", g, count=1)
+          gradle.write_text(g, encoding="utf-8")
+
+          # Hard guard: these tested engine components must survive the UI rebuild.
+          required = [
+              "androidx.camera:camera-core",
+              "androidx.camera:camera-camera2",
+              "androidx.camera:camera-video",
+              "androidx.media3:media3-transformer",
+              "RootEncoder:library:2.7.5",
+          ]
+          final_g = gradle.read_text(encoding="utf-8")
+          missing = [x for x in required if x not in final_g]
+          if missing:
+              raise SystemExit("ENGINE GUARD FAILED: " + ", ".join(missing))
+
+          final_j = java.read_text(encoding="utf-8")
+          assert "import java.io.FileOutputStream;" in final_j
+          assert "private void r117InstallOrganizedCameraUi()" in final_j
+          print("R117 UI injection complete; tested R116 engine foundation preserved.")
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36 platform
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build R117 APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd r116
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee ../r117-build.log
+          mkdir -p ../r117-output
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             ../r117-output/Magic-Pro-R117-TikTok-Engine.apk
+
+      - name: Upload build log if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R117-FAILED-BUILD-LOG
+          path: r117-build.log
+          if-no-files-found: warn
+
+      - name: Upload R117 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Magic-Pro-R117-TikTok-Engine-APK
+          path: r117-output/Magic-Pro-R117-TikTok-Engine.apk
+          if-no-files-found: error
