@@ -1,0 +1,102 @@
+name: Build Magic Pro R116 Production Control Center FIX4
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/R116-PRODUCTION-CONTROL-CENTER-FIX4-APK.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Recreate R116 project from FIX3 and patch compile error
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import pathlib, yaml
+          source = pathlib.Path('.github/workflows/R116-PRODUCTION-CONTROL-CENTER-FIX3-APK.yml')
+          data = yaml.safe_load(source.read_text(encoding='utf-8'))
+          steps = data['jobs']['build']['steps']
+          create = next(s for s in steps if s.get('name') == 'Create R116 Android project')
+          out = pathlib.Path('/tmp/create-r116.sh')
+          out.write_text(create['run'], encoding='utf-8')
+          print(f'Extracted FIX3 project generator to {out}')
+          PY
+          bash /tmp/create-r116.sh
+
+          JAVA='r116/app/src/main/java/com/sentongoharuna/ducamera/R116MagicProProductionControlActivity.java'
+          test -f "$JAVA"
+          if grep -q 'FileOutputStream' "$JAVA" && ! grep -q '^import java\.io\.FileOutputStream;' "$JAVA"; then
+            if grep -q '^import java\.io\.File;' "$JAVA"; then
+              sed -i '/^import java\.io\.File;/a import java.io.FileOutputStream;' "$JAVA"
+            else
+              sed -i '/^package com\.sentongoharuna\.ducamera;/a import java.io.FileOutputStream;' "$JAVA"
+            fi
+          fi
+          grep -q '^import java\.io\.FileOutputStream;' "$JAVA"
+          echo 'PASS: FileOutputStream import repaired.'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build R116 FIX4 APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd r116
+          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee r116-build.log
+
+      - name: Prepare R116 FIX4 APK
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='r116/app/build/outputs/apk/debug/app-debug.apk'
+          test -f "$APK"
+          cp "$APK" 'Magic-Pro-R116-Production-Control-Center-FIX4.apk'
+          ls -lh 'Magic-Pro-R116-Production-Control-Center-FIX4.apk'
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R116-FIX4-FAILED-BUILD-LOG
+          path: r116/r116-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload R116 FIX4 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Magic-Pro-R116-Production-Control-Center-FIX4-APK
+          path: Magic-Pro-R116-Production-Control-Center-FIX4.apk
+          if-no-files-found: error
+          retention-days: 30
